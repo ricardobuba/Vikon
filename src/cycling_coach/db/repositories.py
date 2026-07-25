@@ -91,6 +91,45 @@ def upsert_daily_metric(session: Session, athlete_id: int, m: CanonicalDailyMetr
     session.execute(stmt)
 
 
+def load_activity_loads(
+    session: Session, athlete_id: int
+) -> list[tuple[date, int, float]]:
+    """(día, duración_s, NP_w) por actividad con potencia, para calcular TSS.
+    NP = weighted_avg_power_w (NP de Strava) o, en su defecto, avg_power_w."""
+    rows = session.execute(
+        select(
+            Activity.start_time,
+            Activity.moving_time_s,
+            Activity.elapsed_time_s,
+            Activity.weighted_avg_power_w,
+            Activity.avg_power_w,
+        )
+        .where(Activity.athlete_id == athlete_id)
+        .order_by(Activity.start_time)
+    ).all()
+    out: list[tuple[date, int, float]] = []
+    for start, moving, elapsed, wap, avg in rows:
+        np_w = wap if wap is not None else avg
+        dur = moving if moving is not None else elapsed
+        if np_w and dur:
+            out.append((start.date(), int(dur), float(np_w)))
+    return out
+
+
+def latest_parameter_estimate(
+    session: Session, athlete_id: int, param: str
+) -> float | None:
+    return session.execute(
+        select(ParameterEstimate.mean)
+        .where(
+            ParameterEstimate.athlete_id == athlete_id,
+            ParameterEstimate.param == param,
+        )
+        .order_by(ParameterEstimate.as_of.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def load_power_activities(
     session: Session, athlete_id: int
 ) -> list[tuple[datetime, int, list]]:

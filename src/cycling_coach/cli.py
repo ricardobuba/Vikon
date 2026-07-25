@@ -43,6 +43,7 @@ from cycling_coach.twin import estimate_cp as estimate_cp_service
 from cycling_coach.twin.cp_estimation import CPEstimationResult
 from cycling_coach.twin.cp_estimation import backtest as backtest_service
 from cycling_coach.twin.cp_estimation import tune as tune_service
+from cycling_coach.twin.load_service import compute_and_store_load
 
 # La consola de Windows usa cp1252 por defecto y revienta al imprimir glifos
 # como ✔ o ·. Forzamos UTF-8 en la salida para que la CLI sea portable.
@@ -256,7 +257,8 @@ def twin_show(
     if not state.daily:
         typer.echo("    (sin métricas diarias aún)")
     for k, v in state.daily.items():
-        typer.echo(f"    {k:14} = {v}")
+        shown = f"{v:.1f}" if isinstance(v, float) else v
+        typer.echo(f"    {k:14} = {shown}")
     typer.echo("  slow (estimado, con incertidumbre):")
     if not state.slow:
         typer.echo("    (sin estimaciones aún; ejecuta `cc estimate-cp`)")
@@ -492,6 +494,38 @@ def tune_cp(
     )
     if save:
         typer.secho("\nConfig persistida en model_config ✔", fg=typer.colors.GREEN)
+
+
+# --------------------------------------------------------------------------- #
+@app.command("compute-load")
+def compute_load(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """Calcula CTL/ATL/TSB (fitness/fatiga/forma) de tus entrenamientos y los
+    guarda en el gemelo. Usa el FTP estimado (ejecuta antes `cc estimate-cp`)."""
+    from datetime import datetime
+
+    today = datetime.now(UTC).date()
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        result = compute_and_store_load(session, athlete_id, today)
+    if result is None:
+        typer.secho(
+            "Falta FTP o actividades. Ejecuta `cc estimate-cp` y `cc backfill`.",
+            fg=typer.colors.YELLOW,
+        )
+        raise typer.Exit(code=1)
+    c = result.current
+    typer.secho(
+        f"Carga @ {c.day:%Y-%m-%d} (FTP={result.ftp:.0f}W)",
+        fg=typer.colors.CYAN,
+        bold=True,
+    )
+    typer.echo(f"  CTL (fitness) = {c.ctl:.0f}")
+    typer.echo(f"  ATL (fatiga)  = {c.atl:.0f}")
+    typer.echo(f"  TSB (forma)   = {c.tsb:+.0f}")
+    typer.echo(f"  ({result.n_activities} actividades, {result.n_days} días)")
+    typer.secho("Guardado en el gemelo (daily) ✔", fg=typer.colors.GREEN)
 
 
 # --------------------------------------------------------------------------- #
