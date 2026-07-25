@@ -39,6 +39,7 @@ from cycling_coach.db.repositories import (
 from cycling_coach.domain.models import CanonicalDailyMetric, Estimate
 from cycling_coach.ingest import backfill as run_backfill
 from cycling_coach.oauth_loopback import wait_for_code
+from cycling_coach.planner.service import plan_today
 from cycling_coach.twin import build_state
 from cycling_coach.twin import estimate_cp as estimate_cp_service
 from cycling_coach.twin.cp_estimation import CPEstimationResult
@@ -616,6 +617,29 @@ def tune_cri(
     )
     verdict = "MEJORA" if cal.improved else "no mejora (se mantienen ~defaults)"
     typer.secho(f"  => {verdict}", fg=typer.colors.GREEN if cal.improved else typer.colors.YELLOW)
+
+
+# --------------------------------------------------------------------------- #
+@app.command("plan")
+def plan_cmd(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """Sesión recomendada de hoy (objetivo → entrenamiento → explicación)."""
+    from datetime import datetime
+
+    today = datetime.now(UTC).date()
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        plan = plan_today(session, athlete_id, today)
+    if plan is None:
+        typer.secho("Falta el FTP. Ejecuta `cc estimate-cp` primero.", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    typer.secho(f"Plan de hoy — {plan.template.name}", fg=typer.colors.CYAN, bold=True)
+    typer.echo(f"  {plan.rationale}")
+    typer.echo(f"  Duración ≈ {plan.template.total_minutes():.0f} min  (FTP {plan.ftp:.0f} W)")
+    typer.echo("  Bloques:")
+    for line in plan.targets:
+        typer.echo(f"    • {line}")
 
 
 # --------------------------------------------------------------------------- #
