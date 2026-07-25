@@ -81,14 +81,20 @@ class CanonicalStream:
 #  Métricas diarias (sueño, HRV, FC reposo, CTL/ATL/TSB, peso...)
 # --------------------------------------------------------------------------- #
 class DailyMetricType(StrEnum):
+    # --- MEDIDAS (entrada): de wearables o entrada manual en la app ---
+    #     El sistema nunca las inventa (principio 5).
     sleep_hours = "sleep_hours"
     hrv_rmssd = "hrv_rmssd"
     resting_hr = "resting_hr"
     body_mass_kg = "body_mass_kg"
     readiness = "readiness"
+
+    # --- DERIVADAS (salida): las CALCULA el motor fisiológico (Fase 2) a partir
+    #     de la carga de los entrenamientos. No se importan ni se teclean;
+    #     se persisten con source="computed". Aquí solo para tipar la serie. ---
     ctl = "ctl"          # Chronic Training Load (fitness)
     atl = "atl"          # Acute Training Load (fatiga)
-    tsb = "tsb"          # Training Stress Balance (forma)
+    tsb = "tsb"          # Training Stress Balance (forma) = CTL - ATL
 
 
 @dataclass(frozen=True)

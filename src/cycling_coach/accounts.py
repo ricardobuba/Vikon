@@ -20,6 +20,32 @@ def ensure_athlete(session: Session, name: str | None = None) -> Athlete:
     return athlete
 
 
+def update_static_profile(
+    session: Session, athlete_id: int, profile: dict, *, overwrite: bool = False
+) -> dict:
+    """Aplica un perfil-semilla (p. ej. de Strava) a la fila `athlete`.
+
+    Por defecto solo rellena campos que estén vacíos (None), respetando lo que
+    el usuario haya podido editar en la app. Con `overwrite=True` pisa el valor
+    con el de la semilla. Devuelve el dict de campos efectivamente cambiados.
+    """
+    athlete = session.get(Athlete, athlete_id)
+    if athlete is None:
+        raise ValueError(f"No existe el atleta con id={athlete_id}")
+
+    changed: dict = {}
+    for field, value in profile.items():
+        if not hasattr(athlete, field):
+            continue
+        current = getattr(athlete, field)
+        if overwrite or current is None:
+            if current != value:
+                setattr(athlete, field, value)
+                changed[field] = value
+    session.flush()
+    return changed
+
+
 def save_tokens(
     session: Session, athlete_id: int, provider: str, tokens: TokenSet
 ) -> ProviderAccount:

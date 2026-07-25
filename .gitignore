@@ -29,3 +29,7 @@ htmlcov/
 Thumbs.db
 .idea/
 .vscode/
+
+# Artefactos de "guardar página web" en imagen/ (no son assets del proyecto)
+imagen/Logo.html
+imagen/Logo_files/

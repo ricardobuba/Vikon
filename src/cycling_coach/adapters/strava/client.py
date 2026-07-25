@@ -102,15 +102,26 @@ class StravaClient:
                 return
             page += 1
 
+    def get_raw_athlete(self) -> dict:
+        """Perfil del atleta autenticado (GET /athlete)."""
+        return self._get("/athlete").json()
+
     def get_raw_streams(self, activity_id: str) -> dict:
         keys = (
             "time,watts,heartrate,cadence,velocity_smooth,"
             "altitude,distance,temp,moving,grade_smooth"
         )
-        resp = self._get(
-            f"/activities/{activity_id}/streams",
-            {"keys": keys, "key_by_type": "true"},
-        )
+        try:
+            resp = self._get(
+                f"/activities/{activity_id}/streams",
+                {"keys": keys, "key_by_type": "true"},
+            )
+        except httpx.HTTPStatusError as exc:
+            # 404 = la actividad no tiene streams (entrada manual, sin sensores).
+            # Es esperado para actividades antiguas; no es un error.
+            if exc.response.status_code == 404:
+                return {}
+            raise
         return resp.json()
 
 

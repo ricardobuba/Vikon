@@ -24,6 +24,7 @@ class BackfillResult:
     activities_ingested: int = 0
     streams_ingested: int = 0
     skipped_existing: int = 0
+    stream_errors: int = 0
 
 
 def backfill(
@@ -46,6 +47,8 @@ def backfill(
     for act in source.iter_activities(after=after, before=before):
         result.activities_seen += 1
 
+        # 1) La actividad se persiste en su propia transacción: aunque luego
+        #    falle la descarga de streams, la actividad ya queda guardada.
         with session_scope() as session:
             if skip_existing and activity_exists(
                 session, source.provider, act.provider_activity_id
@@ -54,14 +57,22 @@ def backfill(
                 if on_progress:
                     on_progress(act, "skip")
                 continue
-
             activity_id = upsert_activity(session, athlete_id, act)
             result.activities_ingested += 1
 
-            if fetch_streams:
-                for stream in source.get_streams(act.provider_activity_id):
-                    upsert_stream(session, activity_id, stream)
-                    result.streams_ingested += 1
+        # 2) Streams por separado y con aislamiento de errores: un fallo puntual
+        #    (timeout, 5xx, actividad rara) no debe abortar todo el backfill.
+        if fetch_streams:
+            try:
+                streams = source.get_streams(act.provider_activity_id)
+            except Exception:  # noqa: BLE001 — robustez del backfill; se contabiliza
+                result.stream_errors += 1
+                streams = []
+            if streams:
+                with session_scope() as session:
+                    for stream in streams:
+                        upsert_stream(session, activity_id, stream)
+                        result.streams_ingested += 1
 
         if on_progress:
             on_progress(act, "ingested")

@@ -10,6 +10,7 @@ Comandos Fase 1:
 
 from __future__ import annotations
 
+import sys
 import webbrowser
 from datetime import UTC, datetime
 
@@ -31,6 +32,14 @@ from cycling_coach.ingest import backfill as run_backfill
 from cycling_coach.oauth_loopback import wait_for_code
 from cycling_coach.twin import build_state
 
+# La consola de Windows usa cp1252 por defecto y revienta al imprimir glifos
+# como ✔ o ·. Forzamos UTF-8 en la salida para que la CLI sea portable.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    except (AttributeError, ValueError):
+        pass
+
 app = typer.Typer(help="AI Cycling Coach — CLI de la Fase 1 (ingesta de datos).")
 
 
@@ -41,12 +50,23 @@ def db_create() -> None:
 
     Para producción/versionado real usaremos migraciones Alembic; esto sirve
     para arrancar rápido en local.
+
+    pgvector es opcional en Fase 1 (solo se usa en la fase del RAG científico):
+    si la extensión no está disponible, se avisa y se continúa igualmente.
     """
     from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
 
     engine = get_engine()
-    with engine.begin() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        typer.echo("  pgvector habilitado.")
+    except SQLAlchemyError:
+        typer.secho(
+            "  pgvector no disponible (se añadirá en la fase del RAG). Continúo sin él.",
+            fg=typer.colors.YELLOW,
+        )
     Base.metadata.create_all(engine)
     typer.secho("Esquema creado ✔", fg=typer.colors.GREEN)
 
@@ -79,6 +99,54 @@ def strava_auth() -> None:
         f"Autorizado ✔  atleta Strava id={tokens.athlete_id}, scope={tokens.scope}",
         fg=typer.colors.GREEN,
     )
+
+
+# --------------------------------------------------------------------------- #
+@app.command("athlete-sync")
+def athlete_sync(
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Pisar valores existentes con los de Strava."
+    ),
+) -> None:
+    """Trae el perfil estático desde Strava (nombre, sexo, peso) al gemelo.
+
+    Es una SEMILLA: por defecto solo rellena campos vacíos, respetando lo que
+    edites en la app. Strava no expone fecha de nacimiento ni altura.
+    """
+    settings = get_settings()
+    with session_scope() as session:
+        loaded = accounts.load_tokens(session, "strava")
+        if loaded is None:
+            typer.secho(
+                "No hay credenciales de Strava. Ejecuta `cc strava-auth`.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+        account, tokens = loaded
+        athlete_id = account.athlete_id
+
+    def persist_refresh(new: TokenSet) -> None:
+        with session_scope() as s:
+            accounts.save_tokens(s, athlete_id, "strava", new)
+
+    with StravaClient(
+        settings.strava_client_id, settings.strava_client_secret, tokens, persist_refresh
+    ) as client:
+        profile = StravaSource(client).get_athlete_profile()
+
+    with session_scope() as session:
+        changed = accounts.update_static_profile(
+            session, athlete_id, profile, overwrite=overwrite
+        )
+
+    typer.secho(f"Perfil de Strava: {profile}", fg=typer.colors.CYAN)
+    if changed:
+        typer.secho(f"Actualizado ✔  {changed}", fg=typer.colors.GREEN)
+    else:
+        typer.secho(
+            "Nada que actualizar (ya estaba relleno; usa --overwrite para forzar).",
+            fg=typer.colors.YELLOW,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -136,7 +204,8 @@ def backfill(
         f"\nHecho ✔  vistas={result.activities_seen}  "
         f"nuevas={result.activities_ingested}  "
         f"streams={result.streams_ingested}  "
-        f"ya_existentes={result.skipped_existing}",
+        f"ya_existentes={result.skipped_existing}  "
+        f"errores_stream={result.stream_errors}",
         fg=typer.colors.GREEN,
     )
 

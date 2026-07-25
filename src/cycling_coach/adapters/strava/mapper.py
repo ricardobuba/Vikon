@@ -76,6 +76,26 @@ def map_activity(raw: dict) -> CanonicalActivity:
     )
 
 
+def map_athlete(raw: dict) -> dict:
+    """Perfil estático desde Strava. Solo expone nombre, sexo y peso;
+    fecha de nacimiento y altura NO están en la API (se rellenan en la app).
+
+    Devuelve solo las claves con valor, para poder usarlo como semilla sin
+    pisar con `None` datos que el usuario haya editado a mano."""
+    first = (raw.get("firstname") or "").strip()
+    last = (raw.get("lastname") or "").strip()
+    name = " ".join(p for p in (first, last) if p) or None
+
+    profile: dict = {}
+    if name:
+        profile["name"] = name
+    if raw.get("sex") in ("M", "F"):
+        profile["sex"] = raw["sex"]
+    if raw.get("weight"):  # kg (float)
+        profile["weight_kg"] = float(raw["weight"])
+    return profile
+
+
 def map_streams(raw_streams: dict) -> list[CanonicalStream]:
     """`raw_streams` es la respuesta con `key_by_type=true`:
     {"watts": {"data": [...]}, "heartrate": {"data": [...]}, ...}."""
