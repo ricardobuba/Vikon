@@ -11,6 +11,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from cycling_coach.db.repositories import (
+    latest_daily_metric,
     latest_parameter_estimate,
     load_activity_loads,
     load_cri_weights,
@@ -32,6 +33,7 @@ from cycling_coach.physiology.cri import (
     compute_cri,
     norm_freshness,
     norm_performance,
+    norm_recovery,
     norm_trend,
 )
 from cycling_coach.twin.cp_estimation import resolve_config
@@ -115,7 +117,13 @@ def compute_cri_service(
         "freshness": 0.5,
         "trend": 0.5,
     }
-    comps["recovery"] = None      # HRV/sueño no ingestados
+    # Recuperación desde el check-in manual reciente (sueño + sensación), si lo hay.
+    sleep = latest_daily_metric(session, athlete_id, "sleep_hours", as_of)
+    feel = latest_daily_metric(session, athlete_id, "readiness", as_of)
+    recent = timedelta(days=3)
+    sleep_h = sleep[1] if sleep and (as_of - sleep[0]) <= recent else None
+    feel_v = feel[1] if feel and (as_of - feel[0]) <= recent else None
+    comps["recovery"] = norm_recovery(sleep_hours=sleep_h, feel=feel_v)
     comps["compliance"] = None    # sin plan (Fase 3)
     weights = load_cri_weights(session, athlete_id)
     return CRIDetail(

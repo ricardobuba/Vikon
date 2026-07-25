@@ -116,6 +116,19 @@ def load_activity_loads(
     return out
 
 
+def latest_daily_metric(
+    session: Session, athlete_id: int, metric: str, on_or_before: date | None = None
+) -> tuple[date, float] | None:
+    """Último valor (día, valor) de una métrica diaria, opcionalmente <= fecha."""
+    q = select(DailyMetric.day, DailyMetric.value).where(
+        DailyMetric.athlete_id == athlete_id, DailyMetric.metric == metric
+    )
+    if on_or_before is not None:
+        q = q.where(DailyMetric.day <= on_or_before)
+    row = session.execute(q.order_by(DailyMetric.day.desc()).limit(1)).first()
+    return (row[0], row[1]) if row else None
+
+
 def latest_parameter_estimate(
     session: Session, athlete_id: int, param: str
 ) -> float | None:

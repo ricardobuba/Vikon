@@ -49,6 +49,24 @@ def norm_trend(ctl_now: float, ctl_prev: float, span: float = 40.0) -> float:
     return _clip01(0.5 + (ctl_now - ctl_prev) / span)
 
 
+def norm_recovery(
+    sleep_hours: float | None = None,
+    feel: float | None = None,
+    sleep_floor: float = 5.0,
+    sleep_target: float = 8.0,
+) -> float | None:
+    """Recuperación desde AUTO-REPORTE subjetivo (sin wearable): horas de sueño
+    y/o sensación (1–10). Señal validada de disposición. None si no hay ninguno."""
+    parts: list[float] = []
+    if sleep_hours is not None:
+        parts.append(_clip01((sleep_hours - sleep_floor) / (sleep_target - sleep_floor)))
+    if feel is not None:
+        parts.append(_clip01((feel - 1.0) / 9.0))    # escala 1–10
+    if not parts:
+        return None
+    return sum(parts) / len(parts)
+
+
 @dataclass
 class CRIResult:
     cri: float                                   # 0–100

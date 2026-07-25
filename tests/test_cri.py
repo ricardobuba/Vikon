@@ -9,6 +9,7 @@ from cycling_coach.physiology.cri import (
     compute_cri,
     norm_freshness,
     norm_performance,
+    norm_recovery,
     norm_trend,
 )
 
@@ -65,3 +66,24 @@ def test_calibrate_moves_toward_true_weights():
 
 def test_calibrate_none_with_few_samples():
     assert calibrate_weights([({"performance": 0.5, "freshness": 0.5}, 0.5)]) is None
+
+
+def test_recovery_from_subjective_inputs():
+    assert norm_recovery(sleep_hours=8.0) == 1.0        # sueño pleno
+    assert norm_recovery(sleep_hours=5.0) == 0.0        # sueño mínimo
+    assert norm_recovery(feel=10.0) == 1.0              # sensación máxima
+    assert norm_recovery(feel=1.0) == 0.0
+    assert norm_recovery(sleep_hours=8.0, feel=1.0) == 0.5   # media
+    assert norm_recovery() is None                      # sin datos → no aporta
+
+
+def test_cri_works_the_same_shape_with_or_without_recovery():
+    # Sin recuperación (caso de la mayoría): CRI válido con 3 componentes.
+    base = {"performance": 0.8, "freshness": 0.6, "trend": 0.5,
+            "recovery": None, "compliance": None}
+    without = compute_cri(base)
+    assert without.coverage == 0.75 and 0 < without.cri <= 100
+    # Con recuperación (check-in): entra el componente, cobertura mayor.
+    withrec = compute_cri({**base, "recovery": 0.9})
+    assert withrec.coverage == 0.90
+    assert "recovery" not in withrec.missing

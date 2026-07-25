@@ -34,8 +34,9 @@ from cycling_coach.db.repositories import (
     mark_activity_as_test,
     store_parameter_estimate,
     store_test_result,
+    upsert_daily_metric,
 )
-from cycling_coach.domain.models import Estimate
+from cycling_coach.domain.models import CanonicalDailyMetric, Estimate
 from cycling_coach.ingest import backfill as run_backfill
 from cycling_coach.oauth_loopback import wait_for_code
 from cycling_coach.twin import build_state
@@ -534,6 +535,35 @@ def compute_load(
 
 
 # --------------------------------------------------------------------------- #
+@app.command("checkin")
+def checkin(
+    sleep: float = typer.Option(None, help="Horas de sueño anoche."),
+    feel: float = typer.Option(None, help="Sensación / disposición hoy (1–10)."),
+    date: str = typer.Option(None, help="Fecha YYYY-MM-DD (por defecto, hoy)."),
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """Check-in diario manual (sueño y sensación) → alimenta la recuperación del
+    CRI sin ningún wearable. Es el 'pop-up' diario, por detrás."""
+    if sleep is None and feel is None:
+        typer.secho("Indica al menos --sleep o --feel.", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    day = dateparser.parse(date).date() if date else datetime.now(UTC).date()
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        if sleep is not None:
+            upsert_daily_metric(
+                session, athlete_id,
+                CanonicalDailyMetric("sleep_hours", day, sleep, "manual"),
+            )
+        if feel is not None:
+            upsert_daily_metric(
+                session, athlete_id,
+                CanonicalDailyMetric("readiness", day, feel, "manual"),
+            )
+    typer.secho(f"Check-in guardado ({day:%Y-%m-%d}) ✔", fg=typer.colors.GREEN)
+
+
+# --------------------------------------------------------------------------- #
 @app.command("cri")
 def cri_cmd(
     athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
@@ -552,11 +582,13 @@ def cri_cmd(
     typer.secho(f"CRI = {r.cri:.0f}/100", fg=typer.colors.CYAN, bold=True)
     for k, v in r.components.items():
         typer.echo(f"  {k:12} = {v:.2f}")
-    typer.echo(f"  (cobertura {r.coverage:.0%}; faltan: {', '.join(r.missing) or 'nada'})")
-    typer.secho(
-        "  CRI v1 heurístico y PARCIAL: sin recuperación (HRV/sueño) ni cumplimiento (plan).",
-        fg=typer.colors.YELLOW,
-    )
+    # Los componentes ausentes son OPCIONALES (mejoran el índice, no lo invalidan).
+    hints = {
+        "recovery": "haz `cc checkin --sleep --feel`",
+        "compliance": "requiere plan (Fase 3)",
+    }
+    for k in r.missing:
+        typer.echo(f"  {k:12} = —   (opcional: {hints.get(k, '')})")
 
 
 # --------------------------------------------------------------------------- #
