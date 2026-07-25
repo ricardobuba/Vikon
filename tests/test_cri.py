@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from cycling_coach.physiology.cri import (
+    calibrate_weights,
     compute_cri,
     norm_freshness,
     norm_performance,
@@ -41,3 +44,24 @@ def test_cri_zero_when_nothing_available():
     res = compute_cri({"performance": None})
     assert res.cri == 0.0
     assert res.coverage == 0.0
+
+
+def test_calibrate_moves_toward_true_weights():
+    # Rendimiento real = 0.7·performance + 0.3·freshness; trend irrelevante.
+    rng = np.random.default_rng(0)
+    samples = []
+    for _ in range(200):
+        a, b, c = rng.random(3)
+        outcome = 0.7 * a + 0.3 * b + 0.05 * rng.standard_normal()
+        samples.append(({"performance": a, "freshness": b, "trend": c}, outcome))
+    cal = calibrate_weights(
+        samples, {"performance": 0.34, "freshness": 0.33, "trend": 0.33}, ridge=0.01
+    )
+    assert cal is not None
+    assert cal.weights["performance"] > cal.weights["freshness"]
+    assert cal.weights["freshness"] > cal.weights["trend"]   # trend al fondo
+    assert cal.corr_learned >= cal.corr_default
+
+
+def test_calibrate_none_with_few_samples():
+    assert calibrate_weights([({"performance": 0.5, "freshness": 0.5}, 0.5)]) is None

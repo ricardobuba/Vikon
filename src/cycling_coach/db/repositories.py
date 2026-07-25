@@ -180,6 +180,23 @@ def load_model_config(session: Session, athlete_id: int) -> dict | None:
     ).scalar_one_or_none()
 
 
+def save_cri_weights(session: Session, athlete_id: int, weights: dict | None) -> None:
+    stmt = insert(ModelConfig).values(
+        athlete_id=athlete_id, config={}, cri_weights=weights
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[ModelConfig.athlete_id],
+        set_={"cri_weights": stmt.excluded.cri_weights},
+    )
+    session.execute(stmt)
+
+
+def load_cri_weights(session: Session, athlete_id: int) -> dict | None:
+    return session.execute(
+        select(ModelConfig.cri_weights).where(ModelConfig.athlete_id == athlete_id)
+    ).scalar_one_or_none()
+
+
 def mark_activity_as_test(session: Session, activity_id: int) -> Activity | None:
     """Marca una actividad como esfuerzo maximal. Devuelve la actividad o None."""
     act = session.get(Activity, activity_id)

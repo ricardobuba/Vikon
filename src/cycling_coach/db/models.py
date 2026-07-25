@@ -189,6 +189,7 @@ class ModelConfig(Base):
         ForeignKey("athlete.id", ondelete="CASCADE"), primary_key=True
     )
     config: Mapped[dict] = mapped_column(JSONB)
+    cri_weights: Mapped[dict | None] = mapped_column(JSONB)   # pesos CRI calibrados
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

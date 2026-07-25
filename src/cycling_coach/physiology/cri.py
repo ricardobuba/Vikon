@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import numpy as np
+
 DEFAULT_WEIGHTS: dict[str, float] = {
     "performance": 0.35,
     "freshness": 0.25,      # (1 − Fatiga)
@@ -53,6 +55,73 @@ class CRIResult:
     components: dict[str, float] = field(default_factory=dict)  # disponibles, [0,1]
     missing: list[str] = field(default_factory=list)
     coverage: float = 0.0                        # fracción del peso total cubierta
+
+
+@dataclass
+class CRICalibration:
+    weights: dict[str, float]        # pesos aprendidos (renormalizados)
+    corr_default: float              # correlación CRI(defaults) vs rendimiento
+    corr_learned: float              # correlación CRI(aprendidos) vs rendimiento
+    n: int
+
+    @property
+    def improved(self) -> bool:
+        # Solo "mejora" si logra una correlación POSITIVA y usable (no basta con
+        # ser menos mala): evita guardar pesos que sobreajustan ruido.
+        return self.corr_learned > 0.15 and self.corr_learned > self.corr_default + 0.02
+
+
+def _cri_score(samples: list[tuple[dict[str, float], float]], w: dict[str, float]) -> np.ndarray:
+    keys = list(w)
+    total = sum(w.values()) or 1.0
+    return np.array([sum(w[k] * c[k] for k in keys) / total for c, _ in samples])
+
+
+def calibrate_weights(
+    samples: list[tuple[dict[str, float], float]],
+    default_weights: dict[str, float] | None = None,
+    ridge: float = 0.5,
+) -> CRICalibration | None:
+    """Aprende los pesos de los componentes maximizando la correlación con el
+    rendimiento observado (regresión regularizada hacia los defaults, pesos ≥0).
+
+    `samples` = [(componentes[0,1], rendimiento_observado)]. Devuelve None con
+    pocos datos. Compara la correlación con los pesos por defecto vs aprendidos."""
+    w0d = default_weights or DEFAULT_WEIGHTS
+    if len(samples) < 8:
+        return None
+    keys = [k for k in w0d if all(k in c for c, _ in samples)]
+    if len(keys) < 2:
+        return None
+
+    x = np.array([[c[k] for k in keys] for c, _ in samples], dtype=float)
+    y = np.array([o for _, o in samples], dtype=float)
+    xc = x - x.mean(axis=0)
+    yc = y - y.mean()
+    w0 = np.array([w0d[k] for k in keys])
+
+    # Ridge hacia los pesos por defecto.
+    a = xc.T @ xc + ridge * np.eye(len(keys))
+    b = xc.T @ yc + ridge * w0
+    w = np.clip(np.linalg.solve(a, b), 0.0, None)
+    avail_total = float(sum(w0d[k] for k in keys))
+    w = w / w.sum() * avail_total if w.sum() > 0 else w0
+    learned = {k: float(wi) for k, wi in zip(keys, w, strict=True)}
+
+    defaults_avail = {k: w0d[k] for k in keys}
+
+    def _corr(weights: dict[str, float]) -> float:
+        s = _cri_score(samples, weights)
+        if np.std(s) == 0 or np.std(y) == 0:
+            return 0.0
+        return float(np.corrcoef(s, y)[0, 1])
+
+    return CRICalibration(
+        weights=learned,
+        corr_default=_corr(defaults_avail),
+        corr_learned=_corr(learned),
+        n=len(samples),
+    )
 
 
 def compute_cri(

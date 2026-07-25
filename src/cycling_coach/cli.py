@@ -43,6 +43,7 @@ from cycling_coach.twin import estimate_cp as estimate_cp_service
 from cycling_coach.twin.cp_estimation import CPEstimationResult
 from cycling_coach.twin.cp_estimation import backtest as backtest_service
 from cycling_coach.twin.cp_estimation import tune as tune_service
+from cycling_coach.twin.cri_service import calibrate_cri as calibrate_cri_service
 from cycling_coach.twin.cri_service import compute_cri_service
 from cycling_coach.twin.load_service import compute_and_store_load
 
@@ -90,6 +91,9 @@ def db_create() -> None:
                 "ALTER TABLE activity ADD COLUMN IF NOT EXISTS "
                 "is_maximal_test boolean NOT NULL DEFAULT false"
             )
+        )
+        conn.execute(
+            text("ALTER TABLE model_config ADD COLUMN IF NOT EXISTS cri_weights jsonb")
         )
     typer.secho("Esquema creado ✔", fg=typer.colors.GREEN)
 
@@ -553,6 +557,33 @@ def cri_cmd(
         "  CRI v1 heurístico y PARCIAL: sin recuperación (HRV/sueño) ni cumplimiento (plan).",
         fg=typer.colors.YELLOW,
     )
+
+
+# --------------------------------------------------------------------------- #
+@app.command("tune-cri")
+def tune_cri(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+    save: bool = typer.Option(True, help="Guardar los pesos calibrados."),
+) -> None:
+    """Calibra los pesos del CRI contra tu rendimiento real (cap. 5.3)."""
+    from datetime import datetime
+
+    today = datetime.now(UTC).date()
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        cal = calibrate_cri_service(session, athlete_id, today, save=save)
+    if cal is None:
+        typer.secho("Datos insuficientes para calibrar el CRI.", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    typer.secho(f"Calibración CRI (n={cal.n} días con esfuerzo):", fg=typer.colors.CYAN, bold=True)
+    for k, v in cal.weights.items():
+        typer.echo(f"  {k:12} = {v:.2f}")
+    typer.echo(
+        f"  correlación con rendimiento: defaults={cal.corr_default:+.2f} → "
+        f"aprendidos={cal.corr_learned:+.2f}"
+    )
+    verdict = "MEJORA" if cal.improved else "no mejora (se mantienen ~defaults)"
+    typer.secho(f"  => {verdict}", fg=typer.colors.GREEN if cal.improved else typer.colors.YELLOW)
 
 
 # --------------------------------------------------------------------------- #
