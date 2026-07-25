@@ -1,0 +1,23 @@
+services:
+  db:
+    # Imagen oficial de pgvector sobre Postgres 16 (el mismo motor irá al VPS de producción).
+    image: pgvector/pgvector:pg16
+    container_name: cyclingcoach-db
+    environment:
+      POSTGRES_USER: cc
+      POSTGRES_PASSWORD: cc
+      POSTGRES_DB: cycling_coach
+    ports:
+      - "5432:5432"
+    volumes:
+      - cc_pgdata:/var/lib/postgresql/data
+      # Se ejecuta una sola vez, al crear el volumen: habilita la extensión pgvector.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cc -d cycling_coach"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  cc_pgdata:

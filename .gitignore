@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv/
+build/
+dist/
+
+# Entornos / secretos
+.env
+*.local
+
+# Datos locales (nunca versionar streams ni exports de Strava)
+data/
+*.fit
+*.gpx
+*.tcx
+
+# Herramientas
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# SO / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
