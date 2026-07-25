@@ -43,6 +43,7 @@ from cycling_coach.twin import estimate_cp as estimate_cp_service
 from cycling_coach.twin.cp_estimation import CPEstimationResult
 from cycling_coach.twin.cp_estimation import backtest as backtest_service
 from cycling_coach.twin.cp_estimation import tune as tune_service
+from cycling_coach.twin.cri_service import compute_cri_service
 from cycling_coach.twin.load_service import compute_and_store_load
 
 # La consola de Windows usa cp1252 por defecto y revienta al imprimir glifos
@@ -526,6 +527,32 @@ def compute_load(
     typer.echo(f"  TSB (forma)   = {c.tsb:+.0f}")
     typer.echo(f"  ({result.n_activities} actividades, {result.n_days} días)")
     typer.secho("Guardado en el gemelo (daily) ✔", fg=typer.colors.GREEN)
+
+
+# --------------------------------------------------------------------------- #
+@app.command("cri")
+def cri_cmd(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """CRI — índice de forma (v1: rendimiento + frescura + tendencia)."""
+    from datetime import datetime
+
+    today = datetime.now(UTC).date()
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        detail = compute_cri_service(session, athlete_id, today)
+    if detail is None:
+        typer.secho("Datos insuficientes (ejecuta backfill/estimate-cp).", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    r = detail.result
+    typer.secho(f"CRI = {r.cri:.0f}/100", fg=typer.colors.CYAN, bold=True)
+    for k, v in r.components.items():
+        typer.echo(f"  {k:12} = {v:.2f}")
+    typer.echo(f"  (cobertura {r.coverage:.0%}; faltan: {', '.join(r.missing) or 'nada'})")
+    typer.secho(
+        "  CRI v1 heurístico y PARCIAL: sin recuperación (HRV/sueño) ni cumplimiento (plan).",
+        fg=typer.colors.YELLOW,
+    )
 
 
 # --------------------------------------------------------------------------- #
