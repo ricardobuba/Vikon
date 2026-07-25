@@ -24,11 +24,17 @@ from cycling_coach.physiology.critical_power import (
     fit_cp_wprime,
     three_param_power,
 )
+from cycling_coach.physiology.durability import (
+    DurabilityFit,
+    best_effort_with_context,
+    estimate_durability,
+)
 from cycling_coach.physiology.tune import learn_hyperparameters
 
 __all__ = [
     "BacktestResult",
     "CPFilterConfig",
+    "DurabilityFit",
     "CPObservation",
     "CPState",
     "CriticalPowerFilter",
@@ -37,7 +43,9 @@ __all__ = [
     "ThreeParamFit",
     "assess_test_need",
     "backtest_one_step",
+    "best_effort_with_context",
     "build_cp_observations",
+    "estimate_durability",
     "fit_3param",
     "fit_cp_wprime",
     "three_param_power",
