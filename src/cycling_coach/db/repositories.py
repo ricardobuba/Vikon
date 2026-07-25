@@ -6,15 +6,18 @@ restricciones únicas naturales (provider_activity_id, etc.).
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from cycling_coach.db.models import Activity, DailyMetric, Stream
+from cycling_coach.db.models import Activity, DailyMetric, ParameterEstimate, Stream
 from cycling_coach.domain.models import (
     CanonicalActivity,
     CanonicalDailyMetric,
     CanonicalStream,
+    Estimate,
 )
 
 
@@ -79,6 +82,42 @@ def upsert_daily_metric(session: Session, athlete_id: int, m: CanonicalDailyMetr
         set_={"value": stmt.excluded.value, "source": stmt.excluded.source},
     )
     session.execute(stmt)
+
+
+def load_power_activities(
+    session: Session, athlete_id: int
+) -> list[tuple[datetime, int, list]]:
+    """(fecha, activity_id, stream_watts) de las actividades con potenciómetro
+    real, ordenadas por fecha. Entrada del estimador de CP/W'."""
+    rows = session.execute(
+        select(Activity.start_time, Activity.id, Stream.data)
+        .join(Stream, Stream.activity_id == Activity.id)
+        .where(
+            Activity.athlete_id == athlete_id,
+            Stream.stream_type == "watts",
+            Activity.device_watts.is_(True),
+        )
+        .order_by(Activity.start_time)
+    ).all()
+    return [(start, aid, data) for start, aid, data in rows]
+
+
+def store_parameter_estimate(
+    session: Session, athlete_id: int, param: str, est: Estimate
+) -> None:
+    """Añade (append-only) un posterior de un parámetro `slow` del gemelo."""
+    session.add(
+        ParameterEstimate(
+            athlete_id=athlete_id,
+            param=param,
+            mean=est.mean,
+            sd=est.sd,
+            ci90_low=est.ci90[0],
+            ci90_high=est.ci90[1],
+            as_of=est.updated_at,
+            source=est.source,
+        )
+    )
 
 
 def activity_exists(session: Session, provider: str, provider_activity_id: str) -> bool:

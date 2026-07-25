@@ -28,8 +28,18 @@ from cycling_coach.adapters.strava.source import StravaSource
 from cycling_coach.config import get_settings
 from cycling_coach.db.engine import get_engine, session_scope
 from cycling_coach.db.models import Activity, Athlete, Base, DailyMetric, Stream
+from cycling_coach.db.repositories import (
+    load_power_activities,
+    store_parameter_estimate,
+)
+from cycling_coach.domain.models import Estimate
 from cycling_coach.ingest import backfill as run_backfill
 from cycling_coach.oauth_loopback import wait_for_code
+from cycling_coach.physiology import (
+    assess_test_need,
+    build_cp_observations,
+    run_cp_filter,
+)
 from cycling_coach.twin import build_state
 
 # La consola de Windows usa cp1252 por defecto y revienta al imprimir glifos
@@ -236,6 +246,72 @@ def twin_show(
         typer.echo("    (sin métricas diarias aún)")
     for k, v in state.daily.items():
         typer.echo(f"    {k:14} = {v}")
+    typer.echo("  slow (estimado, con incertidumbre):")
+    if not state.slow:
+        typer.echo("    (sin estimaciones aún; ejecuta `cc estimate-cp`)")
+    for k, est in state.slow.items():
+        typer.echo(
+            f"    {k:14} = {est.mean:.0f} (90% CI {est.ci90[0]:.0f}–{est.ci90[1]:.0f})"
+            f"  [{est.source}]"
+        )
+
+
+# --------------------------------------------------------------------------- #
+@app.command("estimate-cp")
+def estimate_cp(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+    store: bool = typer.Option(True, help="Guardar el posterior en parameter_estimate."),
+) -> None:
+    """Estima CP/W'/FTP actuales (filtro bayesiano) y los persiste en el gemelo."""
+    with session_scope() as session:
+        if athlete_id is None:
+            first = session.query(Athlete).order_by(Athlete.id).first()
+            if first is None:
+                typer.secho("No hay atletas en la BD.", fg=typer.colors.RED)
+                raise typer.Exit(code=1)
+            athlete_id = first.id
+        activities = load_power_activities(session, athlete_id)
+
+    if not activities:
+        typer.secho(
+            "No hay actividades con potenciómetro. Ejecuta `cc backfill`.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    obs = build_cp_observations(activities)
+    if not obs:
+        typer.secho(
+            "No hay esfuerzos maximales suficientes para estimar CP.",
+            fg=typer.colors.YELLOW,
+        )
+        raise typer.Exit(code=1)
+
+    cur = run_cp_filter(obs)[-1]
+    rec = assess_test_need(cur, obs[-1].when, cur.as_of)
+
+    typer.secho(f"Estimación @ {cur.as_of:%Y-%m-%d}", fg=typer.colors.CYAN, bold=True)
+    typer.echo(f"  CP  = {cur.cp.mean:.0f} W  (90% CI {cur.cp.ci90[0]:.0f}–{cur.cp.ci90[1]:.0f})")
+    typer.echo(f"  FTP = {cur.ftp_w:.0f} W")
+    typer.echo(f"  W'  = {cur.w_prime.mean / 1000:.1f} kJ")
+    color = typer.colors.YELLOW if rec.recommended else typer.colors.GREEN
+    verdict = "RECOMENDADO" if rec.recommended else "no necesario"
+    typer.secho(f"  Test: {verdict} — {rec.reason}", fg=color)
+
+    if store:
+        ftp_sd = cur.cp.sd
+        ftp_est = Estimate(
+            mean=cur.ftp_w,
+            sd=ftp_sd,
+            ci90=(cur.ftp_w - 1.645 * ftp_sd, cur.ftp_w + 1.645 * ftp_sd),
+            updated_at=cur.as_of,
+            source="learned",
+        )
+        with session_scope() as session:
+            store_parameter_estimate(session, athlete_id, "cp", cur.cp)
+            store_parameter_estimate(session, athlete_id, "w_prime", cur.w_prime)
+            store_parameter_estimate(session, athlete_id, "ftp", ftp_est)
+        typer.secho("Persistido en parameter_estimate ✔", fg=typer.colors.GREEN)
 
 
 # --------------------------------------------------------------------------- #

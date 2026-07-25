@@ -147,6 +147,31 @@ class Stream(Base):
     activity: Mapped[Activity] = relationship(back_populates="streams")
 
 
+class ParameterEstimate(Base):
+    """Posterior de un parámetro `slow` del gemelo (CP, W', FTP...) en un instante.
+
+    Append-only: cada re-estimación añade filas nuevas → se conserva el histórico
+    de posteriores para auditar "qué sabíamos el día que decidimos algo" (cap. 12).
+    """
+
+    __tablename__ = "parameter_estimate"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    athlete_id: Mapped[int] = mapped_column(
+        ForeignKey("athlete.id", ondelete="CASCADE"), index=True
+    )
+    param: Mapped[str] = mapped_column(Text)          # "cp" | "w_prime" | "ftp"
+    mean: Mapped[float] = mapped_column(Double)
+    sd: Mapped[float] = mapped_column(Double)
+    ci90_low: Mapped[float] = mapped_column(Double)
+    ci90_high: Mapped[float] = mapped_column(Double)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    source: Mapped[str] = mapped_column(Text)         # "prior"|"test"|"learned"|"import"
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class DailyMetric(Base):
     """Métrica diaria (capa `daily` del gemelo): sueño, HRV, FC reposo, CTL..."""
 

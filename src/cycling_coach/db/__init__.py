@@ -6,6 +6,7 @@ from cycling_coach.db.models import (
     Athlete,
     Base,
     DailyMetric,
+    ParameterEstimate,
     ProviderAccount,
     Stream,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "Athlete",
     "Base",
     "DailyMetric",
+    "ParameterEstimate",
     "ProviderAccount",
     "Stream",
     "get_engine",

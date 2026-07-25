@@ -16,8 +16,8 @@ from datetime import UTC, date, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from cycling_coach.db.models import Athlete, DailyMetric
-from cycling_coach.domain.models import AthleteState
+from cycling_coach.db.models import Athlete, DailyMetric, ParameterEstimate
+from cycling_coach.domain.models import AthleteState, Estimate
 
 
 def build_state(
@@ -42,8 +42,9 @@ def build_state(
         static["age_years"] = _age_years(athlete.birthdate, as_of_day)
 
     daily = _latest_daily_metrics(session, athlete_id, as_of_day)
+    slow = _latest_slow_estimates(session, athlete_id, as_of)
 
-    return AthleteState(static=static, daily=daily, as_of=as_of)
+    return AthleteState(static=static, daily=daily, slow=slow, as_of=as_of)
 
 
 def _latest_daily_metrics(
@@ -67,6 +68,35 @@ def _latest_daily_metrics(
         ).where(DailyMetric.athlete_id == athlete_id)
     ).all()
     return {metric: value for metric, value in rows}
+
+
+def _latest_slow_estimates(
+    session: Session, athlete_id: int, as_of: datetime
+) -> dict[str, Estimate]:
+    """Último posterior de cada parámetro `slow` (CP, W', FTP...) <= as_of."""
+    latest = (
+        select(ParameterEstimate.param, func.max(ParameterEstimate.as_of).label("as_of"))
+        .where(ParameterEstimate.athlete_id == athlete_id, ParameterEstimate.as_of <= as_of)
+        .group_by(ParameterEstimate.param)
+        .subquery()
+    )
+    rows = session.execute(
+        select(ParameterEstimate).join(
+            latest,
+            (ParameterEstimate.param == latest.c.param)
+            & (ParameterEstimate.as_of == latest.c.as_of),
+        ).where(ParameterEstimate.athlete_id == athlete_id)
+    ).scalars().all()
+    return {
+        r.param: Estimate(
+            mean=r.mean,
+            sd=r.sd,
+            ci90=(r.ci90_low, r.ci90_high),
+            updated_at=r.as_of,
+            source=r.source,
+        )
+        for r in rows
+    }
 
 
 def _age_years(birth: date, today: date) -> int:
