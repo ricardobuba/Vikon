@@ -12,6 +12,7 @@ from cycling_coach.physiology.cp_filter import (
     TestRecommendation,
     assess_test_need,
     build_cp_observations,
+    observation_from_activity,
     run_cp_filter,
     run_cp_smoother,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "assess_test_need",
     "build_cp_observations",
     "fit_cp_wprime",
+    "observation_from_activity",
     "run_cp_filter",
     "run_cp_smoother",
 ]

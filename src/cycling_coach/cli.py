@@ -29,6 +29,9 @@ from cycling_coach.config import get_settings
 from cycling_coach.db.engine import get_engine, session_scope
 from cycling_coach.db.models import Activity, Athlete, Base, DailyMetric, Stream
 from cycling_coach.db.repositories import (
+    find_activity_on_date,
+    latest_power_activity,
+    mark_activity_as_test,
     store_parameter_estimate,
     store_test_result,
 )
@@ -75,6 +78,15 @@ def db_create() -> None:
             fg=typer.colors.YELLOW,
         )
     Base.metadata.create_all(engine)
+    # create_all no altera tablas existentes; añadimos columnas nuevas a mano
+    # (idempotente). Para producción, migraciones Alembic.
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE activity ADD COLUMN IF NOT EXISTS "
+                "is_maximal_test boolean NOT NULL DEFAULT false"
+            )
+        )
     typer.secho("Esquema creado ✔", fg=typer.colors.GREEN)
 
 
@@ -376,6 +388,49 @@ def add_test(
         f"Test registrado ({kind}, {when:%Y-%m-%d}): CP≈{cp_val:.0f} W. Re-estimando...\n",
         fg=typer.colors.CYAN,
     )
+    with session_scope() as session:
+        result = estimate_cp_service(session, athlete_id)
+    if result is not None:
+        _report_and_persist(athlete_id, result, store=True)
+
+
+# --------------------------------------------------------------------------- #
+@app.command("mark-test")
+def mark_test(
+    activity: int = typer.Option(None, help="Id de la actividad a marcar como test maximal."),
+    date: str = typer.Option(None, help="Marcar la actividad de esa fecha YYYY-MM-DD."),
+    last: bool = typer.Option(False, "--last", help="Marcar la última actividad con potencia."),
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """Marca una actividad de Strava como esfuerzo maximal (test) y re-estima.
+
+    Usa la curva REAL de esa actividad como ancla de alta confianza — sin teclear
+    ningún número. Elige la actividad por --activity, --date o --last.
+    """
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        if activity is not None:
+            act = mark_activity_as_test(session, activity)
+        elif date is not None:
+            day = dateparser.parse(date).date()
+            found = find_activity_on_date(session, athlete_id, day)
+            act = mark_activity_as_test(session, found.id) if found else None
+        elif last:
+            found = latest_power_activity(session, athlete_id)
+            act = mark_activity_as_test(session, found.id) if found else None
+        else:
+            typer.secho(
+                "Indica --activity <id>, --date <YYYY-MM-DD> o --last.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+
+        if act is None:
+            typer.secho("No se encontró la actividad.", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        label = f"[{act.id}] {act.start_time:%Y-%m-%d}  {act.name or act.sport}"
+
+    typer.secho(f"Marcada como test maximal: {label}. Re-estimando...\n", fg=typer.colors.CYAN)
     with session_scope() as session:
         result = estimate_cp_service(session, athlete_id)
     if result is not None:

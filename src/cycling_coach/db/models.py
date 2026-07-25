@@ -112,6 +112,11 @@ class Activity(Base):
     kilojoules: Mapped[float | None] = mapped_column(Double)
     device_watts: Mapped[bool | None] = mapped_column(Boolean)
     trainer: Mapped[bool | None] = mapped_column(Boolean)
+    # El usuario marca esta actividad como esfuerzo maximal (test) → su curva
+    # real ancla el filtro con alta confianza (ver `cc mark-test`).
+    is_maximal_test: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
 
     raw: Mapped[dict] = mapped_column(JSONB, default=dict)
     ingested_at: Mapped[datetime] = mapped_column(

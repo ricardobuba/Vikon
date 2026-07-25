@@ -213,6 +213,37 @@ def _wprime_from_curve(
     return wp, max(sd, 2000.0)
 
 
+def observation_from_activity(
+    when: datetime,
+    watts: list,
+    fit_durations: Sequence[int] = CP_FIT_DURATIONS,
+    wprime_mean: float = 20000.0,
+    wprime_sd: float = 10000.0,
+    meas_rel_sd: float = 0.02,
+    sample_hz: float = 1.0,
+    confidence_sd_cap: float = 8.0,
+) -> CPObservation | None:
+    """Observación de ALTA confianza desde una actividad marcada como test maximal.
+
+    Usa la curva REAL de la actividad (no un valor a mano) y, al saber que fue
+    maximal, acota la sd de CP (`confidence_sd_cap`) → ancla fuerte el filtro.
+    """
+    curve = mean_maximal_power(clean_power(watts, sample_hz), fit_durations)
+    result = _cp_from_curve_wprior(curve, fit_durations, wprime_mean, wprime_sd, meas_rel_sd)
+    if result is None:
+        return None
+    cp_obs, sd_cp = result
+    sd_cp = min(sd_cp, confidence_sd_cap)
+    wp_result = _wprime_from_curve(curve, fit_durations, cp_obs)
+    if wp_result is not None:
+        wp_obs, sd_wp = wp_result
+    else:
+        wp_obs, sd_wp = wprime_mean, wprime_sd * 100.0
+    return CPObservation(
+        when=when, cp=cp_obs, w_prime=wp_obs, sd_cp=max(sd_cp, 3.0), sd_wp=max(sd_wp, 2000.0)
+    )
+
+
 def build_cp_observations(
     activities: list[tuple[datetime, object, list]],
     window_days: int = 42,

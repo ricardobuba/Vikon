@@ -11,7 +11,11 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from cycling_coach.db.repositories import load_power_activities, load_test_results
+from cycling_coach.db.repositories import (
+    load_marked_test_activities,
+    load_power_activities,
+    load_test_results,
+)
 from cycling_coach.physiology import (
     CPFilterConfig,
     CPObservation,
@@ -19,6 +23,7 @@ from cycling_coach.physiology import (
     TestRecommendation,
     assess_test_need,
     build_cp_observations,
+    observation_from_activity,
     run_cp_filter,
 )
 
@@ -31,7 +36,7 @@ class CPEstimationResult:
     state: CPState
     recommendation: TestRecommendation
     n_activity_obs: int
-    n_test_obs: int
+    n_test_obs: int          # tests manuales (add-test) + actividades marcadas (mark-test)
 
 
 def _test_observations(session: Session, athlete_id: int) -> list[CPObservation]:
@@ -55,7 +60,13 @@ def estimate_cp(
     """Estima CP/W'/FTP actuales. Devuelve None si no hay observaciones."""
     activities = load_power_activities(session, athlete_id)
     activity_obs = build_cp_observations(activities)
+
+    # Anclas: tests manuales (add-test) + actividades marcadas maximales (mark-test).
     test_obs = _test_observations(session, athlete_id)
+    for when, _aid, watts in load_marked_test_activities(session, athlete_id):
+        marked = observation_from_activity(when, watts)
+        if marked is not None:
+            test_obs.append(marked)
 
     all_obs = sorted(activity_obs + test_obs, key=lambda o: o.when)
     if not all_obs:

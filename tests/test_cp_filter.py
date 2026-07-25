@@ -10,6 +10,7 @@ from cycling_coach.physiology.cp_filter import (
     CriticalPowerFilter,
     _wprime_from_curve,
     build_cp_observations,
+    observation_from_activity,
     run_cp_filter,
 )
 
@@ -90,3 +91,15 @@ def test_wprime_none_when_no_effort_above_cp():
     cp = 400.0
     curve = {d: 300.0 for d in (180, 300, 600)}
     assert _wprime_from_curve(curve, [180, 300, 600], cp) is None
+
+
+def test_observation_from_activity_high_confidence():
+    # Actividad marcada (esfuerzo de 20 min): observación con sd de CP acotada.
+    obs = observation_from_activity(BASE, [360.0] * 1200, confidence_sd_cap=8.0)
+    assert obs is not None
+    assert obs.sd_cp <= 8.0        # alta confianza (test maximal)
+    assert obs.cp > 200.0
+
+
+def test_observation_from_activity_none_when_too_short():
+    assert observation_from_activity(BASE, [300.0] * 10) is None

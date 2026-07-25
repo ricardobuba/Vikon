@@ -6,9 +6,9 @@ restricciones únicas naturales (provider_activity_id, etc.).
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -124,6 +124,58 @@ def store_parameter_estimate(
             source=est.source,
         )
     )
+
+
+def mark_activity_as_test(session: Session, activity_id: int) -> Activity | None:
+    """Marca una actividad como esfuerzo maximal. Devuelve la actividad o None."""
+    act = session.get(Activity, activity_id)
+    if act is None:
+        return None
+    act.is_maximal_test = True
+    session.flush()
+    return act
+
+
+def find_activity_on_date(
+    session: Session, athlete_id: int, day: date
+) -> Activity | None:
+    """Actividad con potencia real de ese día (la de mayor potencia media)."""
+    return session.execute(
+        select(Activity)
+        .where(
+            Activity.athlete_id == athlete_id,
+            Activity.device_watts.is_(True),
+            func.date(Activity.start_time) == day,
+        )
+        .order_by(Activity.avg_power_w.desc().nullslast())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def latest_power_activity(session: Session, athlete_id: int) -> Activity | None:
+    return session.execute(
+        select(Activity)
+        .where(Activity.athlete_id == athlete_id, Activity.device_watts.is_(True))
+        .order_by(Activity.start_time.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def load_marked_test_activities(
+    session: Session, athlete_id: int
+) -> list[tuple[datetime, int, list]]:
+    """(fecha, id, watts) de las actividades marcadas como test maximal."""
+    rows = session.execute(
+        select(Activity.start_time, Activity.id, Stream.data)
+        .join(Stream, Stream.activity_id == Activity.id)
+        .where(
+            Activity.athlete_id == athlete_id,
+            Activity.is_maximal_test.is_(True),
+            Stream.stream_type == "watts",
+        )
+        .order_by(Activity.start_time)
+    ).all()
+    return [(start, aid, data) for start, aid, data in rows]
 
 
 def store_test_result(
