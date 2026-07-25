@@ -6,6 +6,7 @@ from datetime import date, timedelta
 
 from cycling_coach.physiology.training_load import (
     compute_ctl_atl_tsb,
+    hr_trimp_tss,
     training_stress_score,
 )
 
@@ -23,6 +24,22 @@ def test_tss_scales_with_intensity_squared():
 def test_tss_zero_without_power_or_ftp():
     assert training_stress_score(0.0, 3600, 300.0) == 0.0
     assert training_stress_score(300.0, 3600, 0.0) == 0.0
+
+
+def test_hr_trimp_threshold_hour_is_about_100():
+    # 1 h a ~umbral (HRr=0.85: HR=169 con rest=50, max=190) → TSS-equiv ≈ 100.
+    tss = hr_trimp_tss(avg_hr=169.0, duration_s=3600, hr_rest=50.0, hr_max=190.0)
+    assert 90.0 < tss < 110.0
+
+
+def test_hr_trimp_zero_below_rest():
+    assert hr_trimp_tss(avg_hr=45.0, duration_s=3600, hr_rest=50.0, hr_max=190.0) == 0.0
+
+
+def test_hr_trimp_rises_with_intensity():
+    easy = hr_trimp_tss(120.0, 3600, 50.0, 190.0)
+    hard = hr_trimp_tss(175.0, 3600, 50.0, 190.0)
+    assert hard > easy
 
 
 def test_ctl_atl_converge_to_constant_load():

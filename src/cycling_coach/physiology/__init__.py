@@ -32,6 +32,7 @@ from cycling_coach.physiology.durability import (
 from cycling_coach.physiology.training_load import (
     LoadPoint,
     compute_ctl_atl_tsb,
+    hr_trimp_tss,
     training_stress_score,
 )
 from cycling_coach.physiology.tune import learn_hyperparameters
@@ -55,6 +56,7 @@ __all__ = [
     "estimate_durability",
     "fit_3param",
     "fit_cp_wprime",
+    "hr_trimp_tss",
     "three_param_power",
     "training_stress_score",
     "learn_hyperparameters",

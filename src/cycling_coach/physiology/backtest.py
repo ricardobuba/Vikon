@@ -58,13 +58,17 @@ def backtest_one_step(
     sd_cp0: float = 30.0,
     sd_wp0: float = 6000.0,
     burn_in: int = 2,
+    target: str = "cp",
+    informative_sd_wp: float = 8000.0,
 ) -> BacktestResult | None:
-    """Backtest one-step-ahead sobre CP. `burn_in` descarta las primeras N
-    predicciones (el filtro aún se está asentando). Devuelve None si no hay
-    suficientes observaciones."""
+    """Backtest one-step-ahead. `target`="cp" (por defecto) o "wprime". Para W'
+    solo se puntúan observaciones INFORMATIVAS (sd_wp < informative_sd_wp: las
+    ventanas sin esfuerzo corto llevan sd enorme y no informan). None si faltan
+    observaciones."""
     cfg = config or CPFilterConfig()
     if len(observations) < burn_in + 2:
         return None
+    dim = 0 if target == "cp" else 1
 
     first = observations[0]
     filt = CriticalPowerFilter(
@@ -79,12 +83,13 @@ def backtest_one_step(
         filt.predict(dt)
         filt._last = obs.when
 
-        mean_pred = float(filt.x[0])
-        # Varianza predictiva NOMINAL del observable = incertidumbre del estado
-        # predicho + ruido de la observación (con su escala, sin la asimetría).
-        s = float(filt.P[0, 0]) + (obs.sd_cp * cfg.obs_noise_scale) ** 2
-        ys.append(obs.cp - mean_pred)
-        variances.append(s)
+        obs_val = obs.cp if dim == 0 else obs.w_prime
+        obs_sd = (obs.sd_cp * cfg.obs_noise_scale) if dim == 0 else obs.sd_wp
+        informative = dim == 0 or obs.sd_wp < informative_sd_wp
+        if informative:
+            mean_pred = float(filt.x[dim])
+            ys.append(obs_val - mean_pred)
+            variances.append(float(filt.P[dim, dim]) + obs_sd**2)
 
         filt.update(obs.cp, obs.w_prime, obs.sd_cp, obs.sd_wp)
 

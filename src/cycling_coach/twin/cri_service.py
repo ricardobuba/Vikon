@@ -3,7 +3,6 @@ los datos reales, calcula el índice y CALIBRA los pesos contra el rendimiento."
 
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -12,8 +11,6 @@ from sqlalchemy.orm import Session
 
 from cycling_coach.db.repositories import (
     latest_daily_metric,
-    latest_parameter_estimate,
-    load_activity_loads,
     load_cri_weights,
     load_power_activities,
     save_cri_weights,
@@ -24,7 +21,6 @@ from cycling_coach.physiology import (
     build_cp_observations,
     compute_ctl_atl_tsb,
     run_cp_smoother,
-    training_stress_score,
 )
 from cycling_coach.physiology.cri import (
     CRICalibration,
@@ -37,6 +33,7 @@ from cycling_coach.physiology.cri import (
     norm_trend,
 )
 from cycling_coach.twin.cp_estimation import resolve_config
+from cycling_coach.twin.load_service import daily_tss_series
 
 
 @dataclass
@@ -66,11 +63,7 @@ def _build_context(session: Session, athlete_id: int, as_of: date) -> _Context |
     cps = np.array([s.cp.mean for s in traj])
     cp_at = sorted((s.as_of.date(), s.cp.mean) for s in traj)
 
-    ftp = latest_parameter_estimate(session, athlete_id, "ftp") or float(cps[-1])
-    daily: dict[date, float] = defaultdict(float)
-    for day, dur, np_w in load_activity_loads(session, athlete_id):
-        daily[day] += training_stress_score(np_w, dur, ftp)
-    daily.setdefault(as_of, 0.0)
+    daily = daily_tss_series(session, athlete_id, as_of) or {as_of: 0.0}
     series = compute_ctl_atl_tsb(daily)
     return _Context(
         cp_at=cp_at,

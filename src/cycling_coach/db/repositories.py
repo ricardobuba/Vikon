@@ -129,6 +129,49 @@ def latest_daily_metric(
     return (row[0], row[1]) if row else None
 
 
+def load_hr_only_loads(
+    session: Session, athlete_id: int
+) -> list[tuple[date, int, float]]:
+    """(día, duración_s, HR media) de actividades CON pulso pero SIN potencia
+    (para carga por TRIMP sin duplicar las que ya tienen potencia)."""
+    rows = session.execute(
+        select(
+            Activity.start_time,
+            Activity.moving_time_s,
+            Activity.elapsed_time_s,
+            Activity.avg_hr,
+        )
+        .where(
+            Activity.athlete_id == athlete_id,
+            Activity.avg_hr.is_not(None),
+            Activity.weighted_avg_power_w.is_(None),
+            Activity.avg_power_w.is_(None),
+        )
+        .order_by(Activity.start_time)
+    ).all()
+    out: list[tuple[date, int, float]] = []
+    for start, moving, elapsed, hr in rows:
+        dur = moving if moving is not None else elapsed
+        if hr and dur:
+            out.append((start.date(), int(dur), float(hr)))
+    return out
+
+
+def estimate_hr_bounds(
+    session: Session, athlete_id: int, default_rest: float = 55.0
+) -> tuple[float, float] | None:
+    """(HRrep, HRmax) estimados: HRmax del máximo observado; HRrep del último
+    resting_hr o un valor por defecto. None si no hay HR."""
+    hr_max = session.execute(
+        select(func.max(Activity.max_hr)).where(Activity.athlete_id == athlete_id)
+    ).scalar_one_or_none()
+    if not hr_max:
+        return None
+    rest_row = latest_daily_metric(session, athlete_id, "resting_hr")
+    hr_rest = rest_row[1] if rest_row else default_rest
+    return float(hr_rest), float(hr_max)
+
+
 def latest_parameter_estimate(
     session: Session, athlete_id: int, param: str
 ) -> float | None:

@@ -26,6 +26,27 @@ def training_stress_score(np_w: float, duration_s: float, ftp_w: float) -> float
     return duration_s * intensity * intensity / 3600.0 * 100.0
 
 
+def hr_trimp_tss(
+    avg_hr: float,
+    duration_s: float,
+    hr_rest: float,
+    hr_max: float,
+    male: bool = True,
+) -> float:
+    """Carga por PULSO (TRIMP de Banister) escalada a TSS-equivalente, para
+    actividades sin potencia. 1 h a ~umbral (HRr≈0.85) ≈ 100.
+
+    TRIMP = min · HRr · 0.64 · e^(b·HRr), HRr=(HR−HRrep)/(HRmax−HRrep), b=1.92 (H).
+    """
+    if hr_max <= hr_rest or avg_hr <= hr_rest or duration_s <= 0:
+        return 0.0
+    hrr = min((avg_hr - hr_rest) / (hr_max - hr_rest), 1.0)
+    b = 1.92 if male else 1.67
+    trimp = (duration_s / 60.0) * hrr * 0.64 * math.exp(b * hrr)
+    ref = 60.0 * 0.85 * 0.64 * math.exp(b * 0.85)   # 1 h a umbral → 100
+    return trimp / ref * 100.0
+
+
 @dataclass
 class LoadPoint:
     day: date

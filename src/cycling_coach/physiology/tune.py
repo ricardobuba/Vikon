@@ -61,7 +61,23 @@ def learn_hyperparameters(
         options={"maxiter": 600, "xatol": 1e-3, "fatol": 1e-3},
     )
     learned = _config_from_theta(base, result.x)
+    learned = replace(learned, q_wp=_learn_q_wp(observations, learned))
     after = backtest_one_step(observations, learned)
     if after is None:
         return None
     return learned, before, after
+
+
+def _learn_q_wp(
+    observations: list[CPObservation],
+    base: CPFilterConfig,
+    grid: tuple[float, ...] = (1e4, 3e4, 1e5, 3e5, 1e6),
+) -> float:
+    """Aprende q_wp (ruido de proceso de W') maximizando la verosimilitud
+    predictiva de W' en el backtest (solo observaciones informativas)."""
+    best_q, best_ll = base.q_wp, -np.inf
+    for q in grid:
+        res = backtest_one_step(observations, replace(base, q_wp=q), target="wprime")
+        if res is not None and res.pred_loglik > best_ll:
+            best_q, best_ll = q, res.pred_loglik
+    return best_q

@@ -1,5 +1,10 @@
 """Servicio de carga de entrenamiento: calcula TSS por sesión y las series
-CTL/ATL/TSB, y persiste el estado actual en la capa `daily` del gemelo."""
+CTL/ATL/TSB, y persiste el estado actual en la capa `daily` del gemelo.
+
+Refinos: (1) el TSS usa el FTP DE LA FECHA de cada actividad (trayectoria CP(t)),
+no un FTP fijo — así la carga histórica está bien ponderada. (2) las actividades
+CON pulso pero SIN potencia aportan carga vía TRIMP (no quedan invisibles).
+"""
 
 from __future__ import annotations
 
@@ -9,14 +14,25 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
+from cycling_coach.db.models import Athlete
 from cycling_coach.db.repositories import (
+    estimate_hr_bounds,
     latest_parameter_estimate,
     load_activity_loads,
+    load_hr_only_loads,
+    load_power_activities,
     upsert_daily_metric,
 )
 from cycling_coach.domain.models import CanonicalDailyMetric
-from cycling_coach.physiology import compute_ctl_atl_tsb, training_stress_score
+from cycling_coach.physiology import (
+    build_cp_observations,
+    compute_ctl_atl_tsb,
+    hr_trimp_tss,
+    run_cp_smoother,
+    training_stress_score,
+)
 from cycling_coach.physiology.training_load import LoadPoint
+from cycling_coach.twin.cp_estimation import resolve_config
 
 
 @dataclass
@@ -27,26 +43,63 @@ class LoadResult:
     ftp: float
 
 
+def ftp_trajectory(session: Session, athlete_id: int) -> list[tuple[date, float]]:
+    """FTP(t) desde la trayectoria CP suavizada: [(fecha, ftp)] ordenada."""
+    activities = load_power_activities(session, athlete_id)
+    obs = build_cp_observations([(st, aid, d) for st, aid, d in activities])
+    if not obs:
+        return []
+    cfg = resolve_config(session, athlete_id, None)
+    return sorted((s.as_of.date(), s.ftp_w) for s in run_cp_smoother(obs, cfg))
+
+
+def _ftp_asof(traj: list[tuple[date, float]], day: date, fallback: float) -> float:
+    ftp = fallback
+    for d, v in traj:
+        if d <= day:
+            ftp = v
+        else:
+            break
+    return ftp
+
+
+def daily_tss_series(
+    session: Session, athlete_id: int, as_of: date
+) -> dict[date, float] | None:
+    """TSS diario: potencia (FTP de la fecha) + pulso (TRIMP) para las sin potencia."""
+    ftp_traj = ftp_trajectory(session, athlete_id)
+    fallback = latest_parameter_estimate(session, athlete_id, "ftp")
+    if fallback is None and ftp_traj:
+        fallback = ftp_traj[-1][1]
+
+    daily: dict[date, float] = defaultdict(float)
+    if fallback:
+        for day, dur, np_w in load_activity_loads(session, athlete_id):
+            daily[day] += training_stress_score(np_w, dur, _ftp_asof(ftp_traj, day, fallback))
+
+    hr_bounds = estimate_hr_bounds(session, athlete_id)
+    if hr_bounds:
+        hr_rest, hr_max = hr_bounds
+        athlete = session.get(Athlete, athlete_id)
+        male = (athlete.sex or "M") != "F"
+        for day, dur, avg_hr in load_hr_only_loads(session, athlete_id):
+            daily[day] += hr_trimp_tss(avg_hr, dur, hr_rest, hr_max, male)
+
+    if not daily:
+        return None
+    daily.setdefault(as_of, 0.0)
+    return daily
+
+
 def compute_and_store_load(
-    session: Session, athlete_id: int, as_of: date, ftp: float | None = None
+    session: Session, athlete_id: int, as_of: date
 ) -> LoadResult | None:
-    """Calcula CTL/ATL/TSB hasta `as_of` con el FTP dado (o el último estimado)
-    y guarda el estado actual en daily_metric. None si falta FTP o actividades."""
-    if ftp is None:
-        ftp = latest_parameter_estimate(session, athlete_id, "ftp")
-    if not ftp:
+    """Calcula CTL/ATL/TSB hasta `as_of` (FTP variable + TRIMP) y guarda el
+    estado actual en daily_metric."""
+    daily = daily_tss_series(session, athlete_id, as_of)
+    if daily is None:
         return None
-
-    loads = load_activity_loads(session, athlete_id)
-    if not loads:
-        return None
-
-    daily_tss: dict[date, float] = defaultdict(float)
-    for day, duration_s, np_w in loads:
-        daily_tss[day] += training_stress_score(np_w, duration_s, ftp)
-    daily_tss.setdefault(as_of, 0.0)   # extender hasta hoy → CTL/ATL decaen
-
-    series = compute_ctl_atl_tsb(daily_tss)
+    series = compute_ctl_atl_tsb(daily)
     last = series[-1]
     for metric, value in (("ctl", last.ctl), ("atl", last.atl), ("tsb", last.tsb)):
         upsert_daily_metric(
@@ -54,4 +107,6 @@ def compute_and_store_load(
             athlete_id,
             CanonicalDailyMetric(metric=metric, day=last.day, value=value, source="computed"),
         )
-    return LoadResult(current=last, n_days=len(series), n_activities=len(loads), ftp=ftp)
+    n_act = sum(1 for d in daily if daily[d] > 0)
+    ftp = latest_parameter_estimate(session, athlete_id, "ftp") or 0.0
+    return LoadResult(current=last, n_days=len(series), n_activities=n_act, ftp=ftp)
