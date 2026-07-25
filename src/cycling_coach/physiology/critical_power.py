@@ -24,11 +24,69 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import numpy as np
+from scipy.optimize import curve_fit
 
 from cycling_coach.domain.models import Estimate
 
 # Duraciones (s) usadas para el ajuste (densas dentro del rango CP-válido).
 CP_FIT_DURATIONS: tuple[int, ...] = (120, 180, 240, 300, 420, 600, 900, 1200)
+
+# Duraciones para el modelo de 3 parámetros (incluye cortas para identificar Pmax).
+PD3_DURATIONS: tuple[int, ...] = (5, 15, 30, 60, 120, 180, 300, 600, 900, 1200)
+
+
+@dataclass
+class ThreeParamFit:
+    cp: Estimate
+    w_prime: Estimate
+    pmax: Estimate         # potencia máxima instantánea (t→0), W
+    r2: float
+
+
+def three_param_power(t: np.ndarray, cp: float, w_prime: float, pmax: float) -> np.ndarray:
+    """Modelo de Morton de 3 parámetros: P(t) = CP + W'/(t + W'/(Pmax−CP)).
+
+    A t→0 tiende a Pmax (finito); a t→∞ tiende a CP. Arregla la potencia infinita
+    del modelo de 2 parámetros en duraciones muy cortas.
+    """
+    return cp + w_prime / (t + w_prime / (pmax - cp))
+
+
+def fit_3param(
+    mmp: dict[int, float], durations: tuple[int, ...] = PD3_DURATIONS
+) -> ThreeParamFit:
+    """Ajuste no lineal del modelo de 3 parámetros a la curva MMP."""
+    ts = sorted(d for d in durations if d in mmp)
+    if len(ts) < 4:
+        raise ValueError("Se necesitan >=4 duraciones para el modelo de 3 parámetros.")
+    t = np.array(ts, dtype=float)
+    p = np.array([mmp[d] for d in ts], dtype=float)
+
+    p_short, p_long = float(p.max()), float(p.min())
+    p0 = [p_long * 0.95, 20000.0, p_short * 1.15]
+    bounds = ([80.0, 1000.0, p_short + 1.0], [500.0, 60000.0, 3000.0])
+    popt, pcov = curve_fit(
+        three_param_power, t, p, p0=p0, bounds=bounds, maxfev=20000
+    )
+    perr = np.sqrt(np.diag(pcov))
+    pred = three_param_power(t, *popt)
+    ss_res = float(np.sum((p - pred) ** 2))
+    ss_tot = float(np.sum((p - p.mean()) ** 2))
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+
+    now = datetime.now(UTC)
+    z90 = 1.645
+
+    def est(mean: float, sd: float) -> Estimate:
+        sd = float(sd) if np.isfinite(sd) else 0.0
+        return Estimate(mean, sd, (mean - z90 * sd, mean + z90 * sd), now, "import")
+
+    return ThreeParamFit(
+        cp=est(float(popt[0]), perr[0]),
+        w_prime=est(float(popt[1]), perr[1]),
+        pmax=est(float(popt[2]), perr[2]),
+        r2=r2,
+    )
 
 
 @dataclass

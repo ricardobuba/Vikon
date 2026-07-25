@@ -7,7 +7,8 @@ import math
 import pytest
 
 from cycling_coach.metrics.cleaning import clean_power
-from cycling_coach.physiology import fit_cp_wprime
+from cycling_coach.physiology import fit_3param, fit_cp_wprime
+from cycling_coach.physiology.critical_power import three_param_power
 
 
 # --------------------------------------------------------------------------- #
@@ -76,3 +77,23 @@ def test_uncertainty_is_reported():
 def test_too_few_points_raises():
     with pytest.raises(ValueError):
         fit_cp_wprime({120: 400.0, 300: 350.0}, durations=(120, 300))
+
+
+# --------------------------------------------------------------------------- #
+#  Modelo de 3 parámetros (Morton)
+# --------------------------------------------------------------------------- #
+def test_3param_recovers_known_parameters():
+    cp, wp, pmax = 300.0, 20000.0, 1100.0
+    durations = [5, 15, 30, 60, 120, 300, 600, 1200]
+    mmp = {d: float(three_param_power(d, cp, wp, pmax)) for d in durations}
+    fit = fit_3param(mmp, durations=tuple(durations))
+    assert abs(fit.cp.mean - cp) < 5.0
+    assert abs(fit.w_prime.mean - wp) < 2000.0
+    assert abs(fit.pmax.mean - pmax) < 60.0
+    assert fit.r2 > 0.999
+
+
+def test_3param_power_is_finite_at_zero_and_tends_to_cp():
+    # A t→0 tiende a Pmax (no infinito); a t muy largo tiende a CP.
+    assert abs(three_param_power(1e-6, 300.0, 20000.0, 1100.0) - 1100.0) < 5.0
+    assert abs(three_param_power(1e7, 300.0, 20000.0, 1100.0) - 300.0) < 1.0

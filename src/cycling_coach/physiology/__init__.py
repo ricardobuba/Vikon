@@ -19,7 +19,10 @@ from cycling_coach.physiology.cp_filter import (
 )
 from cycling_coach.physiology.critical_power import (
     CriticalPowerFit,
+    ThreeParamFit,
+    fit_3param,
     fit_cp_wprime,
+    three_param_power,
 )
 from cycling_coach.physiology.tune import learn_hyperparameters
 
@@ -31,10 +34,13 @@ __all__ = [
     "CriticalPowerFilter",
     "CriticalPowerFit",
     "TestRecommendation",
+    "ThreeParamFit",
     "assess_test_need",
     "backtest_one_step",
     "build_cp_observations",
+    "fit_3param",
     "fit_cp_wprime",
+    "three_param_power",
     "learn_hyperparameters",
     "observation_from_activity",
     "run_cp_filter",
