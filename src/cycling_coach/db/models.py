@@ -147,6 +147,31 @@ class Stream(Base):
     activity: Mapped[Activity] = relationship(back_populates="streams")
 
 
+class TestResult(Base):
+    """Test de campo introducido por el usuario (rampa, 20-min, CP/W'...).
+
+    Se convierte a una observación de CP de ALTA confianza (sd pequeña) que
+    ancla el filtro bayesiano. Es la vía para calibrar/reanclar el modelo
+    cuando la incertidumbre estimada es alta (cap. sobre protocolo de tests)."""
+
+    __tablename__ = "test_result"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    athlete_id: Mapped[int] = mapped_column(
+        ForeignKey("athlete.id", ondelete="CASCADE"), index=True
+    )
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    kind: Mapped[str] = mapped_column(Text)          # "ftp"|"cp"|"effort"|"ramp"
+    cp: Mapped[float] = mapped_column(Double)
+    sd_cp: Mapped[float] = mapped_column(Double)
+    w_prime: Mapped[float | None] = mapped_column(Double)
+    sd_wp: Mapped[float | None] = mapped_column(Double)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class ParameterEstimate(Base):
     """Posterior de un parámetro `slow` del gemelo (CP, W', FTP...) en un instante.
 

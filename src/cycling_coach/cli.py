@@ -29,18 +29,15 @@ from cycling_coach.config import get_settings
 from cycling_coach.db.engine import get_engine, session_scope
 from cycling_coach.db.models import Activity, Athlete, Base, DailyMetric, Stream
 from cycling_coach.db.repositories import (
-    load_power_activities,
     store_parameter_estimate,
+    store_test_result,
 )
 from cycling_coach.domain.models import Estimate
 from cycling_coach.ingest import backfill as run_backfill
 from cycling_coach.oauth_loopback import wait_for_code
-from cycling_coach.physiology import (
-    assess_test_need,
-    build_cp_observations,
-    run_cp_filter,
-)
 from cycling_coach.twin import build_state
+from cycling_coach.twin import estimate_cp as estimate_cp_service
+from cycling_coach.twin.cp_estimation import CPEstimationResult
 
 # La consola de Windows usa cp1252 por defecto y revienta al imprimir glifos
 # como ✔ o ·. Forzamos UTF-8 en la salida para que la CLI sea portable.
@@ -256,62 +253,133 @@ def twin_show(
         )
 
 
-# --------------------------------------------------------------------------- #
-@app.command("estimate-cp")
-def estimate_cp(
-    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
-    store: bool = typer.Option(True, help="Guardar el posterior en parameter_estimate."),
+def _resolve_athlete_id(session, athlete_id: int | None) -> int:
+    if athlete_id is not None:
+        return athlete_id
+    first = session.query(Athlete).order_by(Athlete.id).first()
+    if first is None:
+        typer.secho("No hay atletas en la BD.", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    return first.id
+
+
+def _report_and_persist(
+    athlete_id: int, result: CPEstimationResult, store: bool
 ) -> None:
-    """Estima CP/W'/FTP actuales (filtro bayesiano) y los persiste en el gemelo."""
-    with session_scope() as session:
-        if athlete_id is None:
-            first = session.query(Athlete).order_by(Athlete.id).first()
-            if first is None:
-                typer.secho("No hay atletas en la BD.", fg=typer.colors.RED)
-                raise typer.Exit(code=1)
-            athlete_id = first.id
-        activities = load_power_activities(session, athlete_id)
-
-    if not activities:
-        typer.secho(
-            "No hay actividades con potenciómetro. Ejecuta `cc backfill`.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(code=1)
-
-    obs = build_cp_observations(activities)
-    if not obs:
-        typer.secho(
-            "No hay esfuerzos maximales suficientes para estimar CP.",
-            fg=typer.colors.YELLOW,
-        )
-        raise typer.Exit(code=1)
-
-    cur = run_cp_filter(obs)[-1]
-    rec = assess_test_need(cur, obs[-1].when, cur.as_of)
-
+    cur, rec = result.state, result.recommendation
     typer.secho(f"Estimación @ {cur.as_of:%Y-%m-%d}", fg=typer.colors.CYAN, bold=True)
     typer.echo(f"  CP  = {cur.cp.mean:.0f} W  (90% CI {cur.cp.ci90[0]:.0f}–{cur.cp.ci90[1]:.0f})")
     typer.echo(f"  FTP = {cur.ftp_w:.0f} W")
     typer.echo(f"  W'  = {cur.w_prime.mean / 1000:.1f} kJ")
+    typer.echo(f"  (obs: {result.n_activity_obs} de actividades, {result.n_test_obs} de tests)")
     color = typer.colors.YELLOW if rec.recommended else typer.colors.GREEN
     verdict = "RECOMENDADO" if rec.recommended else "no necesario"
     typer.secho(f"  Test: {verdict} — {rec.reason}", fg=color)
 
     if store:
-        ftp_sd = cur.cp.sd
+        sd = cur.cp.sd
         ftp_est = Estimate(
             mean=cur.ftp_w,
-            sd=ftp_sd,
-            ci90=(cur.ftp_w - 1.645 * ftp_sd, cur.ftp_w + 1.645 * ftp_sd),
+            sd=sd,
+            ci90=(cur.ftp_w - 1.645 * sd, cur.ftp_w + 1.645 * sd),
             updated_at=cur.as_of,
-            source="learned",
+            source=cur.cp.source,
         )
         with session_scope() as session:
             store_parameter_estimate(session, athlete_id, "cp", cur.cp)
             store_parameter_estimate(session, athlete_id, "w_prime", cur.w_prime)
             store_parameter_estimate(session, athlete_id, "ftp", ftp_est)
         typer.secho("Persistido en parameter_estimate ✔", fg=typer.colors.GREEN)
+
+
+# --------------------------------------------------------------------------- #
+@app.command("estimate-cp")
+def estimate_cp(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+    store: bool = typer.Option(True, help="Guardar el posterior en parameter_estimate."),
+) -> None:
+    """Estima CP/W'/FTP actuales (filtro bayesiano, actividades + tests)."""
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        result = estimate_cp_service(session, athlete_id)
+    if result is None:
+        typer.secho(
+            "Sin datos suficientes. Ejecuta `cc backfill` o añade un test con `cc add-test`.",
+            fg=typer.colors.YELLOW,
+        )
+        raise typer.Exit(code=1)
+    _report_and_persist(athlete_id, result, store)
+
+
+# --------------------------------------------------------------------------- #
+@app.command("add-test")
+def add_test(
+    ftp: float = typer.Option(None, help="FTP medido (W). P. ej. de un test."),
+    cp: float = typer.Option(None, help="CP medido directamente (W)."),
+    wprime: float = typer.Option(None, help="W' medido (kJ), junto con --cp."),
+    minutes: float = typer.Option(None, help="Duración de un esfuerzo maximal (min)."),
+    watts: float = typer.Option(None, help="Potencia media de ese esfuerzo (W)."),
+    ramp_max: float = typer.Option(None, help="Potencia máx de 1 min en un test de rampa (W)."),
+    date: str = typer.Option(None, help="Fecha del test YYYY-MM-DD (por defecto, hoy)."),
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """Registra un test de campo como ancla de alta confianza y re-estima.
+
+    Modos (elige uno):
+      --ftp 350                      FTP medido
+      --cp 355 [--wprime 22]         CP (y W') directos
+      --minutes 20 --watts 370       un esfuerzo maximal (mejor >= 12 min)
+      --ramp-max 460                 test de rampa (potencia máx de 1 min)
+    """
+    ftp_ratio = 0.99
+    when = dateparser.parse(date).replace(tzinfo=UTC) if date else datetime.now(UTC)
+
+    kind: str
+    cp_val: float
+    sd_cp: float
+    wp_val: float | None = None
+    sd_wp: float | None = None
+    notes: str | None = None
+
+    if cp is not None:
+        kind, cp_val, sd_cp = "cp", cp, 5.0
+        if wprime is not None:
+            wp_val, sd_wp = wprime * 1000.0, 2000.0
+        notes = "CP/W' directos"
+    elif ftp is not None:
+        kind, cp_val, sd_cp = "ftp", ftp / ftp_ratio, 6.0
+        notes = f"FTP medido {ftp:.0f} W"
+    elif ramp_max is not None:
+        ftp_est = 0.75 * ramp_max
+        kind, cp_val, sd_cp = "ramp", ftp_est / ftp_ratio, 10.0
+        notes = f"rampa 1-min máx {ramp_max:.0f} W → FTP {ftp_est:.0f}"
+    elif minutes is not None and watts is not None:
+        d = minutes * 60.0
+        cp_val = watts - 20000.0 / d           # corrección W' nominal
+        sd_cp = 8.0 if minutes >= 12 else 16.0  # esfuerzos cortos, menos fiables
+        kind = "effort"
+        notes = f"esfuerzo maximal {minutes:.0f} min @ {watts:.0f} W"
+    else:
+        typer.secho(
+            "Indica un test: --ftp, o --cp [--wprime], o --minutes+--watts, o --ramp-max.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        store_test_result(
+            session, athlete_id, when, kind, cp_val, sd_cp, wp_val, sd_wp, notes
+        )
+
+    typer.secho(
+        f"Test registrado ({kind}, {when:%Y-%m-%d}): CP≈{cp_val:.0f} W. Re-estimando...\n",
+        fg=typer.colors.CYAN,
+    )
+    with session_scope() as session:
+        result = estimate_cp_service(session, athlete_id)
+    if result is not None:
+        _report_and_persist(athlete_id, result, store=True)
 
 
 # --------------------------------------------------------------------------- #

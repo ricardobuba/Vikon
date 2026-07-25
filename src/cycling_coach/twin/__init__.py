@@ -1,5 +1,6 @@
-"""Gemelo digital. Fase 1: construir el estado v0 (capas `static` + `daily`)."""
+"""Gemelo digital: estado (static/daily) + estimación de parámetros slow (CP/W')."""
 
 from cycling_coach.twin.builder import build_state
+from cycling_coach.twin.cp_estimation import CPEstimationResult, estimate_cp
 
-__all__ = ["build_state"]
+__all__ = ["CPEstimationResult", "build_state", "estimate_cp"]

@@ -9,6 +9,7 @@ from cycling_coach.db.models import (
     ParameterEstimate,
     ProviderAccount,
     Stream,
+    TestResult,
 )
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "ParameterEstimate",
     "ProviderAccount",
     "Stream",
+    "TestResult",
     "get_engine",
     "session_scope",
 ]

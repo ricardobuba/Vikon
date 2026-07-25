@@ -12,7 +12,13 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from cycling_coach.db.models import Activity, DailyMetric, ParameterEstimate, Stream
+from cycling_coach.db.models import (
+    Activity,
+    DailyMetric,
+    ParameterEstimate,
+    Stream,
+    TestResult,
+)
 from cycling_coach.domain.models import (
     CanonicalActivity,
     CanonicalDailyMetric,
@@ -117,6 +123,41 @@ def store_parameter_estimate(
             as_of=est.updated_at,
             source=est.source,
         )
+    )
+
+
+def store_test_result(
+    session: Session,
+    athlete_id: int,
+    date: datetime,
+    kind: str,
+    cp: float,
+    sd_cp: float,
+    w_prime: float | None = None,
+    sd_wp: float | None = None,
+    notes: str | None = None,
+) -> None:
+    session.add(
+        TestResult(
+            athlete_id=athlete_id,
+            date=date,
+            kind=kind,
+            cp=cp,
+            sd_cp=sd_cp,
+            w_prime=w_prime,
+            sd_wp=sd_wp,
+            notes=notes,
+        )
+    )
+
+
+def load_test_results(session: Session, athlete_id: int) -> list[TestResult]:
+    return list(
+        session.execute(
+            select(TestResult)
+            .where(TestResult.athlete_id == athlete_id)
+            .order_by(TestResult.date)
+        ).scalars().all()
     )
 
 
