@@ -24,6 +24,7 @@ from cycling_coach.physiology.critical_power import (
     fit_cp_wprime,
     three_param_power,
 )
+from cycling_coach.physiology.dfa import dfa_alpha1, intensity_domain_from_alpha1
 from cycling_coach.physiology.durability import (
     DurabilityFit,
     best_effort_with_context,
@@ -52,7 +53,9 @@ __all__ = [
     "best_effort_with_context",
     "build_cp_observations",
     "compute_ctl_atl_tsb",
+    "dfa_alpha1",
     "estimate_durability",
+    "intensity_domain_from_alpha1",
     "fit_3param",
     "fit_cp_wprime",
     "three_param_power",
