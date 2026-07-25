@@ -189,6 +189,30 @@ def _cp_from_curve_wprior(
     return cp_obs, sd_cp
 
 
+def _wprime_from_curve(
+    curve: dict[int, float],
+    fit_durations: Sequence[int],
+    cp: float,
+    short_max_s: int = 420,
+) -> tuple[float, float] | None:
+    """Estima W' de los esfuerzos CORTOS (≤ short_max_s), donde domina lo
+    anaeróbico: W'_d = (P(d) − CP)·d. Combina por mediana (robusta a la
+    incoherencia entre duraciones) y la sd sale de la dispersión.
+
+    Devuelve None si la ventana no tiene esfuerzos cortos por encima de CP
+    (→ no informa sobre W', no se debe forzar una observación)."""
+    works = [
+        (curve[d] - cp) * d
+        for d in fit_durations
+        if d <= short_max_s and d in curve and curve[d] > cp
+    ]
+    if not works:
+        return None
+    wp = float(np.median(works))
+    sd = float(np.std(works)) if len(works) > 1 else wp * 0.3
+    return wp, max(sd, 2000.0)
+
+
 def build_cp_observations(
     activities: list[tuple[datetime, object, list]],
     window_days: int = 42,
@@ -246,13 +270,22 @@ def build_cp_observations(
             continue
         cp_obs, sd_cp = result
         obs_when = max(when_by_key[k] for k in win)   # fecha real, no fin de ventana
+
+        # W' de los esfuerzos cortos de la ventana (si los hay); si no, prior con
+        # sd enorme → el filtro no actualiza W' con ruido.
+        wp_result = _wprime_from_curve(curve, fit_durations, cp_obs)
+        if wp_result is not None:
+            wp_obs, sd_wp = wp_result
+        else:
+            wp_obs, sd_wp = wprime_mean, wprime_sd * 100.0
+
         observations.append(
             CPObservation(
                 when=obs_when,
                 cp=cp_obs,
-                w_prime=wprime_mean,
+                w_prime=wp_obs,
                 sd_cp=max(sd_cp, 4.0),
-                sd_wp=wprime_sd,
+                sd_wp=max(sd_wp, 2000.0),
             )
         )
     return observations

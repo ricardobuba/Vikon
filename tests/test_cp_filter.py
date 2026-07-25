@@ -8,6 +8,7 @@ from cycling_coach.physiology.cp_filter import (
     CPFilterConfig,
     CPObservation,
     CriticalPowerFilter,
+    _wprime_from_curve,
     build_cp_observations,
     run_cp_filter,
 )
@@ -71,3 +72,21 @@ def test_build_excludes_anomalous_activity():
 
 def test_build_returns_empty_without_activities():
     assert build_cp_observations([]) == []
+
+
+def test_wprime_recovered_from_short_efforts():
+    # Curva coherente para CP=350, W'=20 kJ: P(d) = 350 + 20000/d.
+    cp = 350.0
+    curve = {d: cp + 20000.0 / d for d in (180, 240, 300, 600, 1200)}
+    result = _wprime_from_curve(curve, [180, 240, 300, 600, 1200], cp)
+    assert result is not None
+    wp, sd = result
+    assert abs(wp - 20000.0) < 2500.0        # recupera ~20 kJ
+    assert sd > 0.0
+
+
+def test_wprime_none_when_no_effort_above_cp():
+    # Todos los esfuerzos por debajo de CP → no informa sobre W'.
+    cp = 400.0
+    curve = {d: 300.0 for d in (180, 300, 600)}
+    assert _wprime_from_curve(curve, [180, 300, 600], cp) is None
