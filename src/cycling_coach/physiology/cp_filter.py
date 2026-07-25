@@ -43,6 +43,10 @@ class CPFilterConfig:
     # cree menos (×down_weight su sd) — puede ser un día no-maximal, no pérdida de
     # forma. La forma sube rápido con un buen esfuerzo y baja despacio.
     down_weight: float = 6.0
+    # Escala global del ruido de observación (aprendible). >1 = fiarse menos de
+    # las observaciones; <1 = más. Se calibra maximizando la verosimilitud
+    # predictiva (ver physiology/tune.py). 1.0 = usar la sd tal cual.
+    obs_noise_scale: float = 1.0
 
 
 @dataclass
@@ -90,6 +94,8 @@ class CriticalPowerFilter:
         self.P = self.P + np.diag([self.cfg.q_cp * dt_days, self.cfg.q_wp * dt_days])
 
     def update(self, cp_obs: float, wp_obs: float, sd_cp: float, sd_wp: float) -> None:
+        sd_cp *= self.cfg.obs_noise_scale
+        sd_wp *= self.cfg.obs_noise_scale
         # Asimetría: si la observación de CP está por debajo del estado, se cree
         # menos (envolvente, no promedio).
         if cp_obs < self.x[0]:

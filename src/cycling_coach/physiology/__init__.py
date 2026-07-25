@@ -21,6 +21,7 @@ from cycling_coach.physiology.critical_power import (
     CriticalPowerFit,
     fit_cp_wprime,
 )
+from cycling_coach.physiology.tune import learn_hyperparameters
 
 __all__ = [
     "BacktestResult",
@@ -34,6 +35,7 @@ __all__ = [
     "backtest_one_step",
     "build_cp_observations",
     "fit_cp_wprime",
+    "learn_hyperparameters",
     "observation_from_activity",
     "run_cp_filter",
     "run_cp_smoother",

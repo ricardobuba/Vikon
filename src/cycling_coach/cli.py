@@ -42,6 +42,7 @@ from cycling_coach.twin import build_state
 from cycling_coach.twin import estimate_cp as estimate_cp_service
 from cycling_coach.twin.cp_estimation import CPEstimationResult
 from cycling_coach.twin.cp_estimation import backtest as backtest_service
+from cycling_coach.twin.cp_estimation import tune as tune_service
 
 # La consola de Windows usa cp1252 por defecto y revienta al imprimir glifos
 # como ✔ o ·. Forzamos UTF-8 en la salida para que la CLI sea portable.
@@ -454,6 +455,34 @@ def backtest_cmd(
     typer.secho("Backtest one-step-ahead del CP:", fg=typer.colors.CYAN, bold=True)
     for line in result.summary().splitlines():
         typer.echo(f"  {line}")
+
+
+# --------------------------------------------------------------------------- #
+@app.command("tune-cp")
+def tune_cp(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+    save: bool = typer.Option(True, help="Guardar la config aprendida (model_config)."),
+) -> None:
+    """Aprende los hiperparámetros del filtro (máx. verosimilitud predictiva)."""
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        result = tune_service(session, athlete_id, save=save)
+    if result is None:
+        typer.secho("Datos insuficientes para calibrar.", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    learned, before, after = result
+    typer.secho("ANTES (a ojo):", fg=typer.colors.YELLOW, bold=True)
+    for line in before.summary().splitlines():
+        typer.echo(f"  {line}")
+    typer.secho("DESPUÉS (aprendido):", fg=typer.colors.GREEN, bold=True)
+    for line in after.summary().splitlines():
+        typer.echo(f"  {line}")
+    typer.echo(
+        f"\n  q_cp={learned.q_cp:.2f}  q_wp={learned.q_wp:.0f}  "
+        f"obs_scale={learned.obs_noise_scale:.2f}  down_weight={learned.down_weight:.1f}"
+    )
+    if save:
+        typer.secho("\nConfig persistida en model_config ✔", fg=typer.colors.GREEN)
 
 
 # --------------------------------------------------------------------------- #

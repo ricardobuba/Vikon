@@ -81,8 +81,8 @@ def backtest_one_step(
 
         mean_pred = float(filt.x[0])
         # Varianza predictiva NOMINAL del observable = incertidumbre del estado
-        # predicho + ruido de la observación (sin la asimetría, que es robustez).
-        s = float(filt.P[0, 0]) + obs.sd_cp**2
+        # predicho + ruido de la observación (con su escala, sin la asimetría).
+        s = float(filt.P[0, 0]) + (obs.sd_cp * cfg.obs_noise_scale) ** 2
         ys.append(obs.cp - mean_pred)
         variances.append(s)
 

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from cycling_coach.db.models import (
     Activity,
     DailyMetric,
+    ModelConfig,
     ParameterEstimate,
     Stream,
     TestResult,
@@ -124,6 +125,20 @@ def store_parameter_estimate(
             source=est.source,
         )
     )
+
+
+def save_model_config(session: Session, athlete_id: int, config: dict) -> None:
+    stmt = insert(ModelConfig).values(athlete_id=athlete_id, config=config)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[ModelConfig.athlete_id], set_={"config": stmt.excluded.config}
+    )
+    session.execute(stmt)
+
+
+def load_model_config(session: Session, athlete_id: int) -> dict | None:
+    return session.execute(
+        select(ModelConfig.config).where(ModelConfig.athlete_id == athlete_id)
+    ).scalar_one_or_none()
 
 
 def mark_activity_as_test(session: Session, activity_id: int) -> Activity | None:

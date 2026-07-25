@@ -7,14 +7,16 @@ confianza (sd pequeña) que anclan el filtro. Lógica compartida por los comando
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields
 
 from sqlalchemy.orm import Session
 
 from cycling_coach.db.repositories import (
     load_marked_test_activities,
+    load_model_config,
     load_power_activities,
     load_test_results,
+    save_model_config,
 )
 from cycling_coach.physiology import (
     BacktestResult,
@@ -25,6 +27,7 @@ from cycling_coach.physiology import (
     assess_test_need,
     backtest_one_step,
     build_cp_observations,
+    learn_hyperparameters,
     observation_from_activity,
     run_cp_filter,
 )
@@ -39,6 +42,22 @@ class CPEstimationResult:
     recommendation: TestRecommendation
     n_activity_obs: int
     n_test_obs: int          # tests manuales (add-test) + actividades marcadas (mark-test)
+
+
+def _config_from_dict(data: dict) -> CPFilterConfig:
+    """CPFilterConfig desde un dict, ignorando claves desconocidas (drift)."""
+    known = {f.name for f in fields(CPFilterConfig)}
+    return CPFilterConfig(**{k: v for k, v in data.items() if k in known})
+
+
+def resolve_config(
+    session: Session, athlete_id: int, override: CPFilterConfig | None = None
+) -> CPFilterConfig:
+    """Config del filtro: la explícita, o la aprendida (model_config), o defaults."""
+    if override is not None:
+        return override
+    stored = load_model_config(session, athlete_id)
+    return _config_from_dict(stored) if stored else CPFilterConfig()
 
 
 def _test_observations(session: Session, athlete_id: int) -> list[CPObservation]:
@@ -74,7 +93,7 @@ def estimate_cp(
     if not all_obs:
         return None
 
-    trajectory = run_cp_filter(all_obs, config=config or CPFilterConfig())
+    trajectory = run_cp_filter(all_obs, config=resolve_config(session, athlete_id, config))
     current = trajectory[-1]
     rec = assess_test_need(current, all_obs[-1].when, current.as_of)
     return CPEstimationResult(
@@ -97,4 +116,22 @@ def backtest(
     obs = build_cp_observations(
         activities, window_days=window_days, stride_days=window_days
     )
-    return backtest_one_step(obs, config=config or CPFilterConfig())
+    return backtest_one_step(obs, config=resolve_config(session, athlete_id, config))
+
+
+def tune(
+    session: Session, athlete_id: int, window_days: int = 42, save: bool = True
+) -> tuple[CPFilterConfig, BacktestResult, BacktestResult] | None:
+    """Aprende los hiperparámetros (máx. verosimilitud predictiva) y los persiste.
+    Devuelve (config_aprendida, backtest_antes, backtest_después)."""
+    activities = load_power_activities(session, athlete_id)
+    obs = build_cp_observations(
+        activities, window_days=window_days, stride_days=window_days
+    )
+    result = learn_hyperparameters(obs)
+    if result is None:
+        return None
+    learned, before, after = result
+    if save:
+        save_model_config(session, athlete_id, asdict(learned))
+    return learned, before, after

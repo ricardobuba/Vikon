@@ -177,6 +177,23 @@ class TestResult(Base):
     )
 
 
+class ModelConfig(Base):
+    """Hiperparámetros del filtro aprendidos por atleta (1 fila por atleta).
+
+    Se guardan como JSON para no rehacer el esquema al cambiar de modelo. Ver
+    `cc tune-cp` (aprendidos por máxima verosimilitud predictiva)."""
+
+    __tablename__ = "model_config"
+
+    athlete_id: Mapped[int] = mapped_column(
+        ForeignKey("athlete.id", ondelete="CASCADE"), primary_key=True
+    )
+    config: Mapped[dict] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class ParameterEstimate(Base):
     """Posterior de un parámetro `slow` del gemelo (CP, W', FTP...) en un instante.
 
