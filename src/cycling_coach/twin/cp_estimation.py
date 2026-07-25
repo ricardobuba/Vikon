@@ -17,11 +17,13 @@ from cycling_coach.db.repositories import (
     load_test_results,
 )
 from cycling_coach.physiology import (
+    BacktestResult,
     CPFilterConfig,
     CPObservation,
     CPState,
     TestRecommendation,
     assess_test_need,
+    backtest_one_step,
     build_cp_observations,
     observation_from_activity,
     run_cp_filter,
@@ -81,3 +83,18 @@ def estimate_cp(
         n_activity_obs=len(activity_obs),
         n_test_obs=len(test_obs),
     )
+
+
+def backtest(
+    session: Session,
+    athlete_id: int,
+    config: CPFilterConfig | None = None,
+    window_days: int = 42,
+) -> BacktestResult | None:
+    """Backtest one-step-ahead sobre observaciones NO solapadas (stride=ventana,
+    para no filtrar información entre observaciones adyacentes)."""
+    activities = load_power_activities(session, athlete_id)
+    obs = build_cp_observations(
+        activities, window_days=window_days, stride_days=window_days
+    )
+    return backtest_one_step(obs, config=config or CPFilterConfig())

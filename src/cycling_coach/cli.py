@@ -41,6 +41,7 @@ from cycling_coach.oauth_loopback import wait_for_code
 from cycling_coach.twin import build_state
 from cycling_coach.twin import estimate_cp as estimate_cp_service
 from cycling_coach.twin.cp_estimation import CPEstimationResult
+from cycling_coach.twin.cp_estimation import backtest as backtest_service
 
 # La consola de Windows usa cp1252 por defecto y revienta al imprimir glifos
 # como ✔ o ·. Forzamos UTF-8 en la salida para que la CLI sea portable.
@@ -435,6 +436,24 @@ def mark_test(
         result = estimate_cp_service(session, athlete_id)
     if result is not None:
         _report_and_persist(athlete_id, result, store=True)
+
+
+# --------------------------------------------------------------------------- #
+@app.command("backtest")
+def backtest_cmd(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+    window_days: int = typer.Option(42, help="Tamaño de ventana (no solapada)."),
+) -> None:
+    """Valida el modelo de CP: backtest one-step-ahead + calibración de la CI."""
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        result = backtest_service(session, athlete_id, window_days=window_days)
+    if result is None:
+        typer.secho("Datos insuficientes para el backtest.", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    typer.secho("Backtest one-step-ahead del CP:", fg=typer.colors.CYAN, bold=True)
+    for line in result.summary().splitlines():
+        typer.echo(f"  {line}")
 
 
 # --------------------------------------------------------------------------- #

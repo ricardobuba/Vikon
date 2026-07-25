@@ -4,6 +4,7 @@ Empezamos por Critical Power (CP, W'), base para FTP y para el balance de W'.
 Siguientes: Banister/Busso (fitness-fatiga), DFA-α1.
 """
 
+from cycling_coach.physiology.backtest import BacktestResult, backtest_one_step
 from cycling_coach.physiology.cp_filter import (
     CPFilterConfig,
     CPObservation,
@@ -22,6 +23,7 @@ from cycling_coach.physiology.critical_power import (
 )
 
 __all__ = [
+    "BacktestResult",
     "CPFilterConfig",
     "CPObservation",
     "CPState",
@@ -29,6 +31,7 @@ __all__ = [
     "CriticalPowerFit",
     "TestRecommendation",
     "assess_test_need",
+    "backtest_one_step",
     "build_cp_observations",
     "fit_cp_wprime",
     "observation_from_activity",

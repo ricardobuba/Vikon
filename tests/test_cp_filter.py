@@ -103,3 +103,23 @@ def test_observation_from_activity_high_confidence():
 
 def test_observation_from_activity_none_when_too_short():
     assert observation_from_activity(BASE, [300.0] * 10) is None
+
+
+def test_backtest_on_stable_series_is_well_calibrated():
+    from cycling_coach.physiology import backtest_one_step
+
+    # Observaciones ruidosas alrededor de un CP estable → el backtest debe dar
+    # error/sesgo pequeños y cobertura razonable.
+    vals = [350.0, 358.0, 344.0, 353.0, 347.0, 355.0, 349.0, 351.0, 346.0, 352.0]
+    obs = _obs_series(vals, sd_cp=10.0)
+    result = backtest_one_step(obs, config=CPFilterConfig(q_cp=1.0), burn_in=1)
+    assert result is not None
+    assert result.mae < 20.0
+    assert abs(result.bias) < 12.0
+    assert 0 < result.n <= len(obs)
+
+
+def test_backtest_none_when_too_few():
+    from cycling_coach.physiology import backtest_one_step
+
+    assert backtest_one_step(_obs_series([350.0, 351.0]), burn_in=2) is None
