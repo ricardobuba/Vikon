@@ -277,13 +277,30 @@ def _resolve_athlete_id(session, athlete_id: int | None) -> int:
     return first.id
 
 
+def _honest_estimate(mean: float, sd: float, as_of, source: str) -> Estimate:
+    return Estimate(
+        mean=mean,
+        sd=sd,
+        ci90=(mean - 1.645 * sd, mean + 1.645 * sd),
+        updated_at=as_of,
+        source=source,
+    )
+
+
 def _report_and_persist(
     athlete_id: int, result: CPEstimationResult, store: bool
 ) -> None:
     cur, rec = result.state, result.recommendation
+    sd = result.predictive_sd_cp   # incertidumbre honesta (error demostrado)
+    cp_est = _honest_estimate(cur.cp.mean, sd, cur.as_of, cur.cp.source)
+    ftp_est = _honest_estimate(cur.ftp_w, sd, cur.as_of, cur.cp.source)
+
     typer.secho(f"Estimación @ {cur.as_of:%Y-%m-%d}", fg=typer.colors.CYAN, bold=True)
-    typer.echo(f"  CP  = {cur.cp.mean:.0f} W  (90% CI {cur.cp.ci90[0]:.0f}–{cur.cp.ci90[1]:.0f})")
-    typer.echo(f"  FTP = {cur.ftp_w:.0f} W")
+    typer.echo(f"  CP  = {cp_est.mean:.0f} W  (90% CI {cp_est.ci90[0]:.0f}–{cp_est.ci90[1]:.0f})")
+    typer.echo(
+        f"  FTP = {ftp_est.mean:.0f} W  "
+        f"(90% CI {ftp_est.ci90[0]:.0f}–{ftp_est.ci90[1]:.0f})"
+    )
     typer.echo(f"  W'  = {cur.w_prime.mean / 1000:.1f} kJ")
     typer.echo(f"  (obs: {result.n_activity_obs} de actividades, {result.n_test_obs} de tests)")
     color = typer.colors.YELLOW if rec.recommended else typer.colors.GREEN
@@ -291,16 +308,8 @@ def _report_and_persist(
     typer.secho(f"  Test: {verdict} — {rec.reason}", fg=color)
 
     if store:
-        sd = cur.cp.sd
-        ftp_est = Estimate(
-            mean=cur.ftp_w,
-            sd=sd,
-            ci90=(cur.ftp_w - 1.645 * sd, cur.ftp_w + 1.645 * sd),
-            updated_at=cur.as_of,
-            source=cur.cp.source,
-        )
         with session_scope() as session:
-            store_parameter_estimate(session, athlete_id, "cp", cur.cp)
+            store_parameter_estimate(session, athlete_id, "cp", cp_est)
             store_parameter_estimate(session, athlete_id, "w_prime", cur.w_prime)
             store_parameter_estimate(session, athlete_id, "ftp", ftp_est)
         typer.secho("Persistido en parameter_estimate ✔", fg=typer.colors.GREEN)

@@ -363,14 +363,19 @@ def assess_test_need(
     as_of: datetime,
     sd_threshold: float = 12.0,
     staleness_days: int = 42,
+    sd_cp: float | None = None,
 ) -> TestRecommendation:
     """¿Conviene un test? Sí si la incertidumbre del CP es alta o si hace mucho
     que no hay un esfuerzo maximal. Es la traducción del principio 6: el sistema
-    declara cuándo NO sabe y pide un test en vez de inventar un número."""
+    declara cuándo NO sabe y pide un test en vez de inventar un número.
+
+    `sd_cp` permite pasar la incertidumbre HONESTA (error de predicción demostrado)
+    en vez de la CI del estado latente (demasiado estrecha)."""
     reasons: list[str] = []
+    effective_sd = sd_cp if sd_cp is not None else current.cp.sd
     stale = (as_of - last_effort).days if last_effort is not None else None
-    if current.cp.sd > sd_threshold:
-        reasons.append(f"incertidumbre alta (±{current.cp.sd:.0f} W)")
+    if effective_sd > sd_threshold:
+        reasons.append(f"incertidumbre alta (±{effective_sd:.0f} W)")
     if stale is None:
         reasons.append("sin esfuerzos maximales registrados")
     elif stale > staleness_days:

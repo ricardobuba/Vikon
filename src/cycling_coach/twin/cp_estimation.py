@@ -42,6 +42,7 @@ class CPEstimationResult:
     recommendation: TestRecommendation
     n_activity_obs: int
     n_test_obs: int          # tests manuales (add-test) + actividades marcadas (mark-test)
+    predictive_sd_cp: float  # incertidumbre HONESTA del CP actual (error demostrado)
 
 
 def _config_from_dict(data: dict) -> CPFilterConfig:
@@ -93,14 +94,28 @@ def estimate_cp(
     if not all_obs:
         return None
 
-    trajectory = run_cp_filter(all_obs, config=resolve_config(session, athlete_id, config))
+    cfg = resolve_config(session, athlete_id, config)
+    trajectory = run_cp_filter(all_obs, config=cfg)
     current = trajectory[-1]
-    rec = assess_test_need(current, all_obs[-1].when, current.as_of)
+
+    # Incertidumbre HONESTA del CP actual: la CI del estado latente es demasiado
+    # estrecha (el harness lo demostró). Usamos el error de predicción REAL del
+    # backtest (RMSE) como suelo → nunca afirmamos más precisión de la validada.
+    bt_obs = build_cp_observations(activities, window_days=42, stride_days=42)
+    bt = backtest_one_step(bt_obs, cfg)
+    predictive_sd = max(current.cp.sd, bt.rmse) if bt is not None else current.cp.sd
+
+    # La recomendación de test usa la incertidumbre honesta, no la del estado.
+    rec = assess_test_need(
+        current, all_obs[-1].when, current.as_of, sd_cp=predictive_sd
+    )
+
     return CPEstimationResult(
         state=current,
         recommendation=rec,
         n_activity_obs=len(activity_obs),
         n_test_obs=len(test_obs),
+        predictive_sd_cp=predictive_sd,
     )
 
 
