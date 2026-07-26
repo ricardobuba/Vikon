@@ -7,8 +7,8 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from cycling_coach.db.repositories import latest_parameter_estimate
-from cycling_coach.planner.planner import PlannedSession, plan_session
+from cycling_coach.db.repositories import latest_parameter_estimate, next_goal
+from cycling_coach.planner.planner import PlannedSession, phase_for, plan_session
 from cycling_coach.twin.cri_service import compute_cri_service
 from cycling_coach.twin.load_service import build_training_context
 
@@ -34,6 +34,12 @@ def plan_today(
     cri_detail = compute_cri_service(session, athlete_id, as_of)
     cri = cri_detail.result.cri if cri_detail else None
 
+    # Horizonte: si hay un evento futuro, su cercanía define la fase (grieta 5).
+    goal = next_goal(session, athlete_id, as_of)
+    days_to_event = (goal.event_date - as_of).days if goal else None
+    phase = phase_for(days_to_event)
+
     return plan_session(
-        ftp=ftp, tsb=tsb, ctl=ctl, atl=atl, cri=cri, context=ctx, minutes=minutes
+        ftp=ftp, tsb=tsb, ctl=ctl, atl=atl, cri=cri, context=ctx,
+        minutes=minutes, phase=phase, days_to_event=days_to_event,
     )

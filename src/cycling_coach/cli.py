@@ -29,8 +29,10 @@ from cycling_coach.config import get_settings
 from cycling_coach.db.engine import get_engine, session_scope
 from cycling_coach.db.models import Activity, Athlete, Base, DailyMetric, Stream
 from cycling_coach.db.repositories import (
+    add_goal,
     find_activity_on_date,
     latest_power_activity,
+    list_goals,
     mark_activity_as_test,
     store_parameter_estimate,
     store_test_result,
@@ -638,7 +640,7 @@ def plan_cmd(
     typer.secho(f"Plan de hoy — {plan.template.name}", fg=typer.colors.CYAN, bold=True)
     if plan.aspired is not None:
         typer.secho(
-            f"  (rebajado desde {plan.aspired.value} por seguridad)",
+            f"  (rebajado desde {plan.aspired.value}; ver motivo)",
             fg=typer.colors.YELLOW,
         )
     typer.echo(f"  {plan.rationale}")
@@ -646,6 +648,54 @@ def plan_cmd(
     typer.echo("  Bloques:")
     for line in plan.targets:
         typer.echo(f"    • {line}")
+
+
+# --------------------------------------------------------------------------- #
+@app.command("set-goal")
+def set_goal_cmd(
+    event_date: str = typer.Argument(..., help="Fecha del evento (YYYY-MM-DD)."),
+    name: str = typer.Option(None, help="Nombre del evento."),
+    kind: str = typer.Option(None, help="Tipo: road_race|gran_fondo|tt|..."),
+    priority: str = typer.Option("A", help="Prioridad: A|B|C."),
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """Registra un evento objetivo: da al planner un horizonte de temporada."""
+    from datetime import date as _date
+
+    day = _date.fromisoformat(event_date)
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        goal = add_goal(session, athlete_id, day, name=name, kind=kind, priority=priority)
+        days = (goal.event_date - _date.today()).days
+    typer.secho(
+        f"Meta guardada: {name or kind or 'evento'} el {event_date} "
+        f"(faltan {days} días).",
+        fg=typer.colors.GREEN,
+    )
+
+
+@app.command("goals")
+def goals_cmd(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """Lista los eventos objetivo del atleta."""
+    from datetime import date as _date
+
+    today = _date.today()
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        goals = list_goals(session, athlete_id)
+        rows = [
+            (g.event_date.isoformat(), (g.event_date - today).days,
+             g.priority, g.name or g.kind or "—")
+            for g in goals
+        ]
+    if not rows:
+        typer.echo("Sin metas. Usa `cc set-goal YYYY-MM-DD`.")
+        return
+    for iso, days, prio, label in rows:
+        tag = f"faltan {days} d" if days >= 0 else f"hace {-days} d"
+        typer.echo(f"  [{prio}] {iso}  ({tag})  {label}")
 
 
 # --------------------------------------------------------------------------- #

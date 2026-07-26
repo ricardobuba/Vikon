@@ -12,8 +12,34 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from enum import StrEnum
 
 from cycling_coach.planner.library import Objective, WorkoutTemplate, select_template
+
+
+# --- Grieta 5: meta/evento → fase de temporada (horizonte) -------------------
+class Phase(StrEnum):
+    off = "off"          # sin meta: planificación reactiva pura
+    base = "base"        # >12 sem: construir base aeróbica
+    build = "build"      # 6–12 sem: calidad de umbral/sweet spot
+    peak = "peak"        # 2–6 sem: intensidad específica (VO2)
+    taper = "taper"      # <2 sem: descarga, misma intensidad menos volumen
+    race = "race"        # ≤3 días: aperturas / descanso
+
+
+def phase_for(days_to_event: int | None) -> Phase:
+    """Fase de temporada según los días que faltan para el evento objetivo."""
+    if days_to_event is None or days_to_event < 0:
+        return Phase.off
+    if days_to_event <= 3:
+        return Phase.race
+    if days_to_event <= 14:
+        return Phase.taper
+    if days_to_event <= 42:
+        return Phase.peak
+    if days_to_event <= 84:
+        return Phase.build
+    return Phase.base
 
 # --- Grietas 1+2: mirar más allá del snapshot de hoy -------------------------
 # Orden de intensidad de los objetivos (para poder "rebajar" con seguridad).
@@ -195,6 +221,30 @@ def apply_constraints(
     return _BY_RANK[ceiling], f"ajuste por seguridad: {binding}."
 
 
+def apply_phase(desired: Objective, phase: Phase) -> tuple[Objective, str | None]:
+    """Sesga el objetivo según la fase de temporada (grieta 5). Devuelve
+    (objetivo, motivo).
+
+    DECISIÓN DE DISEÑO (confianza): solo actuamos donde la evidencia es fuerte y
+    errar es conservador → la SEMANA DE CARRERA baja a aperturas/descanso. NO
+    imponemos techos en base/build (prohibir intensidad lejos del evento es UNA
+    filosofía de periodización —bloques— que contradice a otras —polarizada— y
+    sobrescribiría lo que tu forma pide sin datos que lo respalden). Ese "¿qué
+    énfasis toca?" es trabajo del simulador (grieta 6), no de un umbral fijo."""
+    if phase is Phase.race:
+        ceil = INTENSITY_RANK[Objective.recovery]
+        if ceil < INTENSITY_RANK[desired]:
+            return _BY_RANK[ceil], "semana de carrera: descarga y aperturas"
+    return desired, None
+
+
+def phase_level_offset(phase: Phase) -> int:
+    """Escalones de dosis a recortar por fase. El TAPER (evidencia fuerte:
+    recortar volumen manteniendo intensidad afila la forma) y la carrera bajan
+    varios escalones. El resto no toca la dosis."""
+    return {Phase.taper: -2, Phase.race: -3}.get(phase, 0)
+
+
 def render_targets(template: WorkoutTemplate, ftp: float) -> list[str]:
     """Convierte cada bloque a vatios reales según el FTP."""
     lines: list[str] = []
@@ -220,6 +270,8 @@ def plan_session(
     cri: float | None = None,
     context: TrainingContext | None = None,
     minutes: float | None = None,
+    phase: Phase = Phase.off,
+    days_to_event: int | None = None,
 ) -> PlannedSession:
     """Genera la sesión recomendada + explicación a partir del estado.
 
@@ -227,8 +279,10 @@ def plan_session(
        umbrales personalizados (grieta 3).
     2) `apply_constraints` lo rebaja si la HISTORIA reciente o la dinámica de
        carga lo desaconsejan (grietas 1+2).
-    3) `select_template` elige la DOSIS de la familia según la forma relativa
-       (percentil de CTL) y el tiempo disponible (grieta 4).
+    3) `apply_phase` sesga por la fase de temporada — solo donde hay evidencia
+       fuerte (grieta 5); el resto solo informa del horizonte.
+    4) `select_template` elige la DOSIS según la forma relativa (percentil de
+       CTL), el tiempo disponible y la descarga de taper/carrera (grietas 4+5).
     Todas las decisiones son explicables."""
     thresholds = None
     fitness_pct = None
@@ -241,14 +295,24 @@ def plan_session(
     objective, adjust = (aspired, None)
     if context is not None:
         objective, adjust = apply_constraints(aspired, context)
+    objective, phase_note = apply_phase(objective, phase)
 
-    template = select_template(objective, fitness_pct, minutes)
-    rationale = (
+    template = select_template(
+        objective, fitness_pct, minutes, level_offset=phase_level_offset(phase)
+    )
+
+    rationale = ""
+    if phase is not Phase.off:
+        wk = f" (~{days_to_event // 7} sem)" if days_to_event is not None else ""
+        rationale += f"[meta en {days_to_event} d{wk} — fase {phase.value}] "
+    rationale += (
         f"Objetivo: {objective.value} — {reason} "
         f"Sesión: {template.name} ({template.description})"
     )
     if adjust:
         rationale += f" [{adjust}]"
+    if phase_note:
+        rationale += f" [{phase_note}]"
     if minutes is not None and template.total_minutes() > minutes:
         rationale += (
             f" [nota: la sesión más corta de calidad ({template.total_minutes():.0f}') "

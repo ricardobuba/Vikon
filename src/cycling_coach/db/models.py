@@ -220,6 +220,27 @@ class ParameterEstimate(Base):
     )
 
 
+class Goal(Base):
+    """Evento objetivo del atleta (carrera, gran fondo...). Da al planner un
+    HORIZONTE: la fecha define la fase de temporada (base→build→peak→taper) y
+    sesga la decisión diaria (grieta 5). Puede haber varios; el planner usa el
+    próximo de mayor prioridad."""
+
+    __tablename__ = "goal"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    athlete_id: Mapped[int] = mapped_column(
+        ForeignKey("athlete.id", ondelete="CASCADE"), index=True
+    )
+    event_date: Mapped[date] = mapped_column(Date, index=True)
+    name: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str | None] = mapped_column(Text)     # road_race|gran_fondo|tt|...
+    priority: Mapped[str] = mapped_column(String(1), default="A")   # A|B|C
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class DailyMetric(Base):
     """Métrica diaria (capa `daily` del gemelo): sueño, HRV, FC reposo, CTL..."""
 

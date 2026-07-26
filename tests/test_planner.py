@@ -6,10 +6,13 @@ from datetime import date, timedelta
 
 from cycling_coach.planner import (
     FormThresholds,
+    Phase,
     RecentDay,
     TrainingContext,
     apply_constraints,
+    apply_phase,
     choose_objective,
+    phase_for,
     plan_session,
     render_targets,
 )
@@ -178,3 +181,46 @@ def test_tight_budget_flags_the_note():
     ctx = TrainingContext(recent=[], fitness_pct=1.0)
     plan = plan_session(ftp=348.0, tsb=12.0, cri=75.0, context=ctx, minutes=30)
     assert "excede" in plan.rationale
+
+
+# --- Grieta 5: meta/evento → fase (con disciplina de confianza) --------------
+def test_phase_boundaries():
+    assert phase_for(None) is Phase.off
+    assert phase_for(120) is Phase.base
+    assert phase_for(60) is Phase.build
+    assert phase_for(30) is Phase.peak
+    assert phase_for(10) is Phase.taper
+    assert phase_for(2) is Phase.race
+    assert phase_for(-1) is Phase.off       # evento pasado
+
+
+def test_base_and_build_do_not_cap_intensity():
+    # DECISIÓN DE DISEÑO: lejos del evento NO imponemos periodización (baja
+    # confianza) — la forma manda. VO2 sigue siendo VO2 en base/build.
+    assert apply_phase(Objective.vo2max, Phase.base) == (Objective.vo2max, None)
+    assert apply_phase(Objective.vo2max, Phase.build) == (Objective.vo2max, None)
+    assert apply_phase(Objective.threshold, Phase.peak) == (Objective.threshold, None)
+
+
+def test_race_week_eases_down():
+    obj, note = apply_phase(Objective.vo2max, Phase.race)
+    assert obj is Objective.recovery
+    assert note and "carrera" in note
+
+
+def test_taper_reduces_dose_not_objective():
+    # En taper el objetivo NO cambia; baja el volumen (dosis).
+    obj, note = apply_phase(Objective.threshold, Phase.taper)
+    assert obj is Objective.threshold and note is None
+    ctx = TrainingContext(recent=[], fitness_pct=1.0)
+    normal = plan_session(ftp=348.0, tsb=12.0, cri=75.0, context=ctx)
+    tapered = plan_session(
+        ftp=348.0, tsb=12.0, cri=75.0, context=ctx,
+        phase=Phase.taper, days_to_event=10,
+    )
+    assert tapered.template.total_minutes() < normal.template.total_minutes()
+
+
+def test_phase_shown_in_rationale():
+    plan = plan_session(ftp=348.0, tsb=0.0, phase=Phase.build, days_to_event=60)
+    assert "fase build" in plan.rationale and "meta en 60" in plan.rationale

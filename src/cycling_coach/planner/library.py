@@ -176,17 +176,20 @@ def select_template(
     objective: Objective,
     fitness_pct: float | None = None,
     minutes: float | None = None,
+    level_offset: int = 0,
 ) -> WorkoutTemplate:
     """Elige la variante de dosis de la familia (grieta 4).
 
     - `fitness_pct` (0–1): percentil del CTL actual del atleta en su historia →
       sobrecarga AUTORREGULADA (más en forma ⇒ más dosis). None ⇒ nivel medio.
+    - `level_offset`: desplaza escalones (p. ej. taper = −2: recorta volumen
+      manteniendo el tipo de sesión).
     - `minutes`: tope de tiempo disponible hoy → baja de escalón hasta encajar.
     """
     variants = LIBRARY[objective].variants
     n = len(variants)
     level = round((fitness_pct if fitness_pct is not None else 0.5) * (n - 1))
-    level = max(0, min(level, n - 1))
+    level = max(0, min(level + level_offset, n - 1))
 
     if minutes is not None:
         while level > 0 and variants[level].total_minutes() > minutes:

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from cycling_coach.db.models import (
     Activity,
     DailyMetric,
+    Goal,
     ModelConfig,
     ParameterEstimate,
     Stream,
@@ -336,6 +337,47 @@ def load_test_results(session: Session, athlete_id: int) -> list[TestResult]:
             select(TestResult)
             .where(TestResult.athlete_id == athlete_id)
             .order_by(TestResult.date)
+        ).scalars().all()
+    )
+
+
+def add_goal(
+    session: Session,
+    athlete_id: int,
+    event_date: date,
+    name: str | None = None,
+    kind: str | None = None,
+    priority: str = "A",
+) -> Goal:
+    """Registra un evento objetivo (horizonte del planner, grieta 5)."""
+    goal = Goal(
+        athlete_id=athlete_id,
+        event_date=event_date,
+        name=name,
+        kind=kind,
+        priority=priority,
+    )
+    session.add(goal)
+    session.flush()
+    return goal
+
+
+def next_goal(session: Session, athlete_id: int, on_or_after: date) -> Goal | None:
+    """Próximo evento futuro (el más cercano; a igualdad, mayor prioridad A<B<C)."""
+    return session.execute(
+        select(Goal)
+        .where(Goal.athlete_id == athlete_id, Goal.event_date >= on_or_after)
+        .order_by(Goal.event_date.asc(), Goal.priority.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def list_goals(session: Session, athlete_id: int) -> list[Goal]:
+    return list(
+        session.execute(
+            select(Goal)
+            .where(Goal.athlete_id == athlete_id)
+            .order_by(Goal.event_date)
         ).scalars().all()
     )
 
