@@ -83,12 +83,14 @@ async function sendChat() {
       body: JSON.stringify({ message: msg }),
     });
     pending.remove();
+    const logged = Object.keys(r.logged || {});
+    if (logged.length) addMsg("✓ registrado: " + logged.join(", "), "hint");
     const hint = [];
     if (r.intent.minutes != null) hint.push(r.intent.minutes + " min");
     if (r.intent.readiness) hint.push(r.intent.readiness);
     if (hint.length) addMsg("interpretado: " + hint.join(", "), "hint");
     addMsg(r.text, "bot");
-    loadHome();  // el chat puede cambiar el plan → refresca Hoy
+    loadHome();  // el chat puede cambiar el plan (o registrar datos) → refresca Hoy
   } catch (e) {
     pending.remove();
     addMsg(e.detail || "No pude responder (¿LLM configurado?).", "bot");

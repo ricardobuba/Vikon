@@ -77,6 +77,54 @@ def test_intent_ignores_garbage_readiness():
     assert it.readiness is None and it.cri_override is None
 
 
+# --- Intención "log": el chat registra datos --------------------------------
+def test_intent_log_extracts_valid_metrics():
+    llm = _StubLLM({"kind": "log", "log": {
+        "weight_kg": 72.0, "sleep_hours": 6.5, "feel": 3, "resting_hr": 48}})
+    it = parse_intent(llm, "hoy peso 72, dormí 6h30 y estoy hecho polvo, pulso 48")
+    assert it.kind == "log"
+    assert it.log == {"weight_kg": 72.0, "sleep_hours": 6.5, "feel": 3.0, "resting_hr": 48.0}
+
+
+def test_intent_log_rejects_out_of_range():
+    # Valores imposibles (alucinación) → descartados.
+    llm = _StubLLM({"kind": "log", "log": {"weight_kg": 9000, "sleep_hours": 6, "feel": 50}})
+    it = parse_intent(llm, "x")
+    assert it.log == {"sleep_hours": 6.0}       # solo el válido sobrevive
+
+
+def test_intent_no_log_when_absent():
+    it = parse_intent(_StubLLM({"kind": "plan"}), "¿qué hago hoy?")
+    assert it.log == {}
+
+
+def test_log_metrics_persists_and_confirms(monkeypatch):
+    from cycling_coach.assistant import assistant as A
+
+    written: list[tuple] = []
+
+    class _LLM:
+        def extract_json(self, s, u):
+            return {"kind": "log", "log": {"sleep_hours": 5.0, "feel": 2}}
+
+        def chat(self, messages, **kw):
+            # el bloque del sistema debe incluir lo registrado para que lo confirme
+            assert "ACABA DE REGISTRAR" in messages[0]["content"]
+            return "Apuntado."
+
+    monkeypatch.setattr(A, "gather_facts", lambda *a, **k: Facts(as_of=date(2026, 7, 26)))
+    monkeypatch.setattr(
+        A, "upsert_daily_metric", lambda s, aid, m: written.append((m.metric, m.value))
+    )
+
+    chat = A.ChatSession(athlete_id=1, as_of=date(2026, 7, 26), llm=_LLM())
+    r = chat.turn(None, "dormí 5 horas y me siento fatal")
+    assert r.logged == {"sleep_hours": 5.0, "feel": 2.0}
+    assert ("sleep_hours", 5.0) in written
+    assert ("readiness", 2.0) in written        # feel → métrica readiness
+    assert chat.readiness is None               # feel registrado → sin override arrastrado
+
+
 # --- Ficha de hechos ---------------------------------------------------------
 def test_facts_prompt_contains_key_numbers():
     f = Facts(as_of=date(2026, 7, 26), ftp=348.0, tsb=-17.8, cri=62.0, cri_coverage=0.75)

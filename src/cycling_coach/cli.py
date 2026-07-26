@@ -705,6 +705,10 @@ def ask_cmd(
         typer.secho(str(exc), fg=typer.colors.YELLOW)
         raise typer.Exit(code=1) from exc
 
+    if reply.logged:
+        typer.secho(
+            f"✓ registrado: {', '.join(reply.logged)}", fg=typer.colors.GREEN
+        )
     it = reply.intent
     interp = []
     if it.minutes is not None:
@@ -829,6 +833,8 @@ def chat_cmd(
             except LLMError as exc:
                 typer.secho(f"  (error del LLM: {exc})", fg=typer.colors.YELLOW)
                 continue
+            if reply.logged:
+                typer.secho(f"  ✓ registrado: {', '.join(reply.logged)}", fg=typer.colors.GREEN)
             hint = []
             if reply.intent.minutes is not None:
                 hint.append(f"{reply.intent.minutes:.0f} min")

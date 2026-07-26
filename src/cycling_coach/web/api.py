@@ -152,6 +152,7 @@ def create_app() -> FastAPI:
                 "minutes": reply.intent.minutes,
                 "readiness": reply.intent.readiness,
             },
+            "logged": reply.logged,
             "plan": _plan_json(reply.facts.plan),
         }
 
