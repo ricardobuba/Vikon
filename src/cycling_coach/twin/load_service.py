@@ -156,7 +156,13 @@ def build_training_context(
         tss, inten = dli.get(d, (0.0, 0.0))
         recent.append(RecentDay(day=d, tss=tss, intensity=inten))
 
-    return current, TrainingContext(ramp_rate=ramp, acwr=acwr, recent=recent)
+    # Distribución de TSB del último año → umbrales personalizados (grieta 3).
+    year_ago = as_of - timedelta(days=365)
+    tsb_history = [p.tsb for p in series if year_ago <= p.day <= as_of]
+
+    return current, TrainingContext(
+        ramp_rate=ramp, acwr=acwr, recent=recent, tsb_history=tsb_history
+    )
 
 
 def compute_and_store_load(

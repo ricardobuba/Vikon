@@ -49,16 +49,62 @@ class RecentDay:
 
 @dataclass
 class TrainingContext:
-    """Contexto temporal para las restricciones de seguridad (grietas 1+2)."""
+    """Contexto temporal para las restricciones de seguridad (grietas 1+2) y la
+    personalización de umbrales de forma (grieta 3)."""
     ramp_rate: float | None = None       # CTL(hoy) − CTL(hace 7 d)
     acwr: float | None = None            # atl/ctl (agudo:crónico)
     recent: list[RecentDay] = field(default_factory=list)   # viejo→ayer
+    tsb_history: list[float] = field(default_factory=list)   # TSB histórico
 
     def yesterday_hard(self) -> bool:
         return bool(self.recent) and self.recent[-1].is_hard
 
     def hard_days_last_week(self) -> int:
         return sum(1 for d in self.recent[-7:] if d.is_hard)
+
+
+# --- Grieta 3: umbrales de forma personalizados (no mágicos) -----------------
+@dataclass
+class FormThresholds:
+    """Cortes de TSB que separan las zonas de forma. Los defaults son la
+    convención poblacional (TrainingPeaks); `personalize` los recentra sobre la
+    distribución REAL del atleta — así "fresco" es fresco-PARA-TI, no un número
+    universal (arregla el sesgo pro-gran-volumen)."""
+    recovery_below: float = -25.0    # TSB < esto → recuperar
+    endurance_below: float = -10.0   # TSB < esto → resistencia
+    sweet_below: float = 5.0         # TSB < esto → sweet spot; si no, umbral/VO2
+    # Por defecto = sweet_below (comportamiento poblacional: VO2 con solo CRI≥70).
+    # La personalización lo sube a p88 → zona VO2 genuina (fresco de verdad PARA TI).
+    fresh_above: float = 5.0         # TSB ≥ esto (+ CRI alto) → VO2máx
+
+    # nº mínimo de días de TSB para fiarnos de los percentiles.
+    MIN_HISTORY = 60
+
+    @classmethod
+    def personalize(cls, tsb_history: list[float]) -> FormThresholds:
+        """Deriva los cortes de los percentiles p15/p40/p70/p88 del propio
+        atleta. Con poca historia devuelve los defaults poblacionales."""
+        vals = sorted(v for v in tsb_history if v is not None)
+        if len(vals) < cls.MIN_HISTORY:
+            return cls()
+        p15, p40, p70, p88 = (_percentile(vals, q) for q in (15, 40, 70, 88))
+        return cls(
+            recovery_below=p15,
+            endurance_below=p40,
+            sweet_below=p70,
+            fresh_above=p88,
+        )
+
+
+def _percentile(sorted_vals: list[float], q: float) -> float:
+    """Percentil `q` (0–100) con interpolación lineal. `sorted_vals` ordenada."""
+    if not sorted_vals:
+        raise ValueError("lista vacía")
+    k = (len(sorted_vals) - 1) * q / 100.0
+    lo = int(k)
+    hi = min(lo + 1, len(sorted_vals) - 1)
+    frac = k - lo
+    return sorted_vals[lo] * (1 - frac) + sorted_vals[hi] * frac
 
 
 @dataclass
@@ -76,26 +122,31 @@ def choose_objective(
     ctl: float | None = None,
     atl: float | None = None,
     cri: float | None = None,
+    thresholds: FormThresholds | None = None,
 ) -> tuple[Objective, str]:
     """Elige el objetivo fisiológico del día según la forma (TSB) y la
-    disposición (CRI). Devuelve (objetivo, motivo explicable)."""
+    disposición (CRI). Devuelve (objetivo, motivo explicable).
+
+    `thresholds` permite recentrar las zonas sobre la distribución del atleta
+    (grieta 3); si es None usa la convención poblacional."""
+    t = thresholds or FormThresholds()
     if tsb is None:
         return Objective.endurance, "sin datos de forma: base aeróbica por defecto."
-    if tsb < -25 or (cri is not None and cri < 40):
+    if tsb < t.recovery_below or (cri is not None and cri < 40):
         return Objective.recovery, (
             f"forma muy baja (TSB {tsb:+.0f}"
             + (f", CRI {cri:.0f}" if cri is not None else "")
             + "): toca recuperar."
         )
-    if tsb < -10:
+    if tsb < t.endurance_below:
         return Objective.endurance, (
             f"arrastras fatiga (TSB {tsb:+.0f}): construir sin sobrecargar."
         )
-    if tsb < 5:
+    if tsb < t.sweet_below:
         return Objective.sweet_spot, (
             f"forma neutra (TSB {tsb:+.0f}): estímulo de calidad sostenible."
         )
-    if cri is not None and cri >= 70:
+    if cri is not None and cri >= 70 and tsb >= t.fresh_above:
         return Objective.vo2max, (
             f"fresco y con buena disposición (TSB {tsb:+.0f}, CRI {cri:.0f}): "
             "empujar el VO2máx."
@@ -173,7 +224,10 @@ def plan_session(
     1) `choose_objective` decide lo que la FORMA de hoy pide (aspiración).
     2) `apply_constraints` lo rebaja si la HISTORIA reciente o la dinámica de
        carga lo desaconsejan (grietas 1+2). Ambas decisiones son explicables."""
-    aspired, reason = choose_objective(tsb, ctl, atl, cri)
+    thresholds = None
+    if context is not None and context.tsb_history:
+        thresholds = FormThresholds.personalize(context.tsb_history)
+    aspired, reason = choose_objective(tsb, ctl, atl, cri, thresholds)
     objective, adjust = (aspired, None)
     if context is not None:
         objective, adjust = apply_constraints(aspired, context)

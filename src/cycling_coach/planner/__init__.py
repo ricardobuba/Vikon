@@ -1,6 +1,7 @@
 """Motor de planificación (Fase 3): estado → objetivo → sesión + explicación."""
 
 from cycling_coach.planner.planner import (
+    FormThresholds,
     PlannedSession,
     RecentDay,
     TrainingContext,
@@ -11,6 +12,7 @@ from cycling_coach.planner.planner import (
 )
 
 __all__ = [
+    "FormThresholds",
     "PlannedSession",
     "RecentDay",
     "TrainingContext",

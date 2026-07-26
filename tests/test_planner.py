@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from cycling_coach.planner import (
+    FormThresholds,
     RecentDay,
     TrainingContext,
     apply_constraints,
@@ -103,3 +104,34 @@ def test_big_volume_day_counts_as_hard():
     # Día largo Z2 (IF bajo) pero TSS alto → cuenta como duro para el espaciado.
     ctx = _ctx([0.6, 0.6, 0.7], tss=[0.0, 0.0, 200.0])
     assert ctx.recent[-1].is_hard
+
+
+# --- Grieta 3: umbrales personalizados --------------------------------------
+def test_thresholds_fall_back_to_population_with_little_history():
+    assert FormThresholds.personalize([0.0, -5.0]) == FormThresholds()
+
+
+def test_thresholds_recenter_on_athlete_distribution():
+    # Atleta de gran volumen: vive crónicamente fatigado (TSB −40..−1).
+    history = [float(v) for v in range(-40, 0)] * 2   # 80 muestras (≥60)
+    t = FormThresholds.personalize(history)
+    # Los cortes bajan muy por debajo de los defaults poblacionales.
+    assert t.recovery_below < -25
+    assert t.endurance_below < -10
+
+
+def test_high_volume_athlete_not_stuck_in_recovery():
+    # TSB −20 sería "recuperar" con el corte −25... no: con SU distribución
+    # es forma más neutra → estímulo, no descanso.
+    history = [float(v) for v in range(-40, 0)] * 2
+    t = FormThresholds.personalize(history)
+    obj, _ = choose_objective(tsb=-20.0, thresholds=t)
+    assert obj is not Objective.recovery
+
+
+def test_personalization_flows_through_plan_session():
+    history = [float(v) for v in range(-40, 0)] * 2   # ≥60 muestras
+    ctx = TrainingContext(recent=[], tsb_history=history)
+    # TSB −18: con defaults sería endurance; con su escala, algo más exigente.
+    plan = plan_session(ftp=348.0, tsb=-18.0, cri=None, context=ctx)
+    assert plan.objective in (Objective.sweet_spot, Objective.threshold)
