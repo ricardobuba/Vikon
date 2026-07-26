@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +13,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,     # permite construir por nombre de campo (tests)
     )
 
     database_url: str = "postgresql+psycopg://cc:cc@localhost:5432/cycling_coach"
@@ -29,7 +31,15 @@ class Settings(BaseSettings):
     #   Ollama:    http://localhost:11434/v1             (local, sin clave)
     #   Anthropic: https://api.anthropic.com/v1          (de pago)
     llm_base_url: str = "https://api.groq.com/openai/v1"
-    llm_api_key: str | None = None
+    # Acepta el nombre genérico o el habitual de cada proveedor, para que la
+    # clave "simplemente funcione" la pongas como la pongas.
+    llm_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "LLM_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+            "GROQ_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
+        ),
+    )
     llm_model: str = "llama-3.3-70b-versatile"
     llm_temperature: float = 0.4
 

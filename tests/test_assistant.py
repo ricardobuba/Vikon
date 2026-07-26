@@ -36,13 +36,15 @@ def test_parse_json_lenient_handles_fences():
 
 
 def test_llm_requires_config():
-    s = Settings(llm_api_key=None, llm_base_url="https://api.groq.com/openai/v1")
+    s = Settings(
+        _env_file=None, llm_api_key=None, llm_base_url="https://api.groq.com/openai/v1"
+    )
     with pytest.raises(LLMError):
         LLMClient.from_settings(s)
 
 
 def test_ollama_local_needs_no_key():
-    s = Settings(llm_api_key=None, llm_base_url="http://localhost:11434/v1")
+    s = Settings(_env_file=None, llm_api_key=None, llm_base_url="http://localhost:11434/v1")
     assert s.llm_configured
     LLMClient.from_settings(s)          # no lanza
 
