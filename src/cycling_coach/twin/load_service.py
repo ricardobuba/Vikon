@@ -33,7 +33,12 @@ from cycling_coach.physiology import (
     training_stress_score,
 )
 from cycling_coach.physiology.training_load import LoadPoint
-from cycling_coach.planner.planner import RecentDay, TrainingContext
+from cycling_coach.planner.planner import (
+    FormThresholds,
+    RecentDay,
+    TrainingContext,
+    _weighted_fraction_below,
+)
 from cycling_coach.twin.cp_estimation import resolve_config
 
 
@@ -173,12 +178,13 @@ def build_training_context(
     # forma relativa para la dosis (grieta 4). El atleta puede haber cambiado de
     # volumen entre años; usar todo capta su capacidad real de largo plazo.
     past = [p for p in series if p.day <= as_of]
-    tsb_history = [p.tsb for p in past]
-    ctl_history = sorted(p.ctl for p in past)
+    tsb_history = [p.tsb for p in past]                 # viejo→nuevo (contiguo)
+    ctl_series = [p.ctl for p in past]                  # viejo→nuevo (contiguo)
     fitness_pct = None
-    if ctl_history:
-        below = sum(1 for c in ctl_history if c <= current.ctl)
-        fitness_pct = below / len(ctl_history)
+    if ctl_series:
+        fitness_pct = _weighted_fraction_below(
+            ctl_series, current.ctl, FormThresholds.HALFLIFE_DAYS
+        )
 
     # Últimos ~8 CTL hasta fin de ayer (coherente con la base matinal): ramp
     # rate durante el rollout del horizonte.

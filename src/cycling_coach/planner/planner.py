@@ -55,6 +55,7 @@ def phase_for(days_to_event: int | None) -> Phase:
 # --- Grietas 1+2: mirar más allá del snapshot de hoy -------------------------
 # Orden de intensidad de los objetivos (para poder "rebajar" con seguridad).
 INTENSITY_RANK: dict[Objective, int] = {
+    Objective.rest: -1,
     Objective.recovery: 0,
     Objective.endurance: 1,
     Objective.sweet_spot: 2,
@@ -118,15 +119,27 @@ class FormThresholds:
 
     # nº mínimo de días de TSB para fiarnos de los percentiles.
     MIN_HISTORY = 60
+    # Semivida del decaimiento (días): un dato de hace HALFLIFE cuenta la mitad
+    # que hoy. Usa TODA la historia pero prioriza el régimen actual (grieta 8).
+    # 180 d = pesa el último medio año sin descartar la capacidad histórica
+    # (elegido por el dueño: bajó volumen este año → el régimen reciente manda).
+    HALFLIFE_DAYS = 180.0
 
     @classmethod
-    def personalize(cls, tsb_history: list[float]) -> FormThresholds:
-        """Deriva los cortes de los percentiles p15/p40/p70/p88 del propio
-        atleta. Con poca historia devuelve los defaults poblacionales."""
-        vals = sorted(v for v in tsb_history if v is not None)
+    def personalize(
+        cls, tsb_history: list[float], halflife_days: float | None = None
+    ) -> FormThresholds:
+        """Deriva los cortes de los percentiles p15/p40/p70/p88 de la distribución
+        del atleta. `tsb_history` va de más viejo a más nuevo (la antigüedad es la
+        posición). Con `halflife_days` pesa más lo reciente; con None, semivida por
+        defecto. Con poca historia devuelve los defaults poblacionales."""
+        vals = [v for v in tsb_history if v is not None]
         if len(vals) < cls.MIN_HISTORY:
             return cls()
-        p15, p40, p70, p88 = (_percentile(vals, q) for q in (15, 40, 70, 88))
+        hl = halflife_days if halflife_days is not None else cls.HALFLIFE_DAYS
+        p15, p40, p70, p88 = (
+            _weighted_percentile(vals, q, hl) for q in (15, 40, 70, 88)
+        )
         return cls(
             recovery_below=p15,
             endurance_below=p40,
@@ -144,6 +157,35 @@ def _percentile(sorted_vals: list[float], q: float) -> float:
     hi = min(lo + 1, len(sorted_vals) - 1)
     frac = k - lo
     return sorted_vals[lo] * (1 - frac) + sorted_vals[hi] * frac
+
+
+def _recency_weights(n: int, halflife_days: float) -> list[float]:
+    """Pesos por antigüedad para una serie diaria contigua viejo→nuevo: el
+    índice n−1 (hoy) pesa 1; retroceder `halflife_days` días halva el peso."""
+    decay = 0.5 ** (1.0 / halflife_days)
+    return [decay ** (n - 1 - i) for i in range(n)]
+
+
+def _weighted_percentile(vals: list[float], q: float, halflife_days: float) -> float:
+    """Percentil `q` (0–100) con pesos de recencia. `vals` va de viejo a nuevo."""
+    weights = _recency_weights(len(vals), halflife_days)
+    pairs = sorted(zip(vals, weights, strict=True))
+    total = sum(w for _, w in pairs)
+    target = q / 100.0 * total
+    cum = 0.0
+    for v, w in pairs:
+        cum += w
+        if cum >= target:
+            return v
+    return pairs[-1][0]
+
+
+def _weighted_fraction_below(vals: list[float], x: float, halflife_days: float) -> float:
+    """Fracción PESADA por recencia de valores ≤ x. `vals` viejo→nuevo."""
+    weights = _recency_weights(len(vals), halflife_days)
+    total = sum(weights)
+    below = sum(w for v, w in zip(vals, weights, strict=True) if v <= x)
+    return below / total if total else 0.0
 
 
 @dataclass
@@ -330,7 +372,17 @@ def plan_session(
             f"simulado: mañana TSB {o.tsb_tomorrow:+.0f}, CTL {o.ctl_gain:+.1f} "
             f"({choice.considered} variantes{rej})"
         )
-        if not choice.safe:
+        # Descanso emergente: si ni el rodaje más suave (recovery) te deja mañana
+        # sobre tu suelo de forma, el mejor "entreno" es NO entrenar (grieta 8).
+        if objective is Objective.recovery and not choice.safe:
+            objective = Objective.rest
+            template = LIBRARY[Objective.rest].variants[0]
+            rest_o = simulate_next_day(ctl, atl, 0.0)
+            sim_note = (
+                f"descanso total: ni el rodaje suave te deja mañana sobre tu suelo "
+                f"({rest_o.tsb_tomorrow:+.0f} con descanso vs {o.tsb_tomorrow:+.0f} rodando)"
+            )
+        elif not choice.safe:
             sim_note += " [ninguna dentro de tu rango: la más suave]"
     else:
         template = select_template(objective, fitness_pct, minutes, level_offset=offset)
@@ -354,13 +406,18 @@ def plan_session(
             f" [nota: la sesión más corta de calidad ({template.total_minutes():.0f}') "
             f"excede tus {minutes:.0f}' — considera partirla o bajar el objetivo]"
         )
+    # `aspired` solo marca un rebaje de INTENSIDAD por seguridad; el descanso
+    # emergente es una escalada de recuperación (ya explicada), no un rebaje.
+    downgraded = (
+        aspired if (objective is not aspired and objective is not Objective.rest) else None
+    )
     return PlannedSession(
         objective=objective,
         template=template,
         ftp=ftp,
         rationale=rationale,
         targets=render_targets(template, ftp),
-        aspired=aspired if objective is not aspired else None,
+        aspired=downgraded,
     )
 
 

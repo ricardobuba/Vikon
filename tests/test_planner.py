@@ -127,6 +127,16 @@ def test_thresholds_recenter_on_athlete_distribution():
     assert t.endurance_below < -10
 
 
+def test_recency_weighting_shifts_toward_recent_regime():
+    # Régimen viejo fresco (TSB +10), reciente fatigado (TSB −10). Con decaimiento
+    # los umbrales se recentran hacia el régimen ACTUAL.
+    hist = [10.0] * 200 + [-10.0] * 200            # viejo→nuevo
+    equalish = FormThresholds.personalize(hist, halflife_days=1e9)
+    recent = FormThresholds.personalize(hist, halflife_days=40)
+    assert recent.sweet_below < equalish.sweet_below
+    assert recent.endurance_below <= equalish.endurance_below
+
+
 def test_high_volume_athlete_not_stuck_in_recovery():
     # TSB −20 sería "recuperar" con el corte −25... no: con SU distribución
     # es forma más neutra → estímulo, no descanso.
@@ -283,6 +293,37 @@ def test_horizon_alternates_hard_easy():
     hard = [session_intensity(d.plan.template) >= 0.85 for d in h]
     assert any(hard)                                  # hay días de calidad
     assert not any(hard[i] and hard[i + 1] for i in range(len(hard) - 1))
+
+
+def test_emergent_rest_when_even_recovery_digs_below_floor():
+    # Muy fatigado (ATL >> CTL): ni el rodaje suave deja mañana sobre el suelo
+    # (default −25) → descanso total.
+    ctx = TrainingContext(recent=[], fitness_pct=0.5)
+    plan = plan_session(ftp=348.0, tsb=-50.0, ctl=40.0, atl=90.0, cri=30.0, context=ctx)
+    assert plan.objective is Objective.rest
+    assert plan.template.total_minutes() == 0
+    assert not plan.targets
+    assert "descanso" in plan.rationale.lower()
+    assert plan.aspired is None          # no es un rebaje de intensidad
+
+
+def test_recovery_stays_when_it_keeps_you_safe():
+    # Fatigado pero recovery mantiene la forma sobre el suelo → recovery, no rest.
+    ctx = TrainingContext(recent=[], fitness_pct=0.5)
+    plan = plan_session(ftp=348.0, tsb=-30.0, ctl=55.0, atl=60.0, cri=35.0, context=ctx)
+    assert plan.objective is Objective.recovery
+
+
+def test_horizon_can_surface_rest_days():
+    # Arrancando hundido, el rollout debe incluir al menos un descanso.
+    ctx = TrainingContext(recent=[], fitness_pct=0.3, tsb_history=[], ctl_window=[45.0] * 8)
+    h = roll_horizon(
+        ftp=348.0, ctl=42.0, atl=95.0, context=ctx, cri=30.0,
+        days=5, start=date(2026, 7, 26),
+    )
+    assert any(d.plan.objective is Objective.rest for d in h)
+    # Tras descansar, el estado se recupera (ATL baja, TSB sube).
+    assert h[-1].tsb > h[0].tsb
 
 
 def test_horizon_tapers_toward_event():

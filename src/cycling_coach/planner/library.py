@@ -14,6 +14,7 @@ from enum import StrEnum
 
 
 class Objective(StrEnum):
+    rest = "rest"                # descanso total (0 carga) — solo lo dispara la sim
     recovery = "recovery"        # recuperación activa
     endurance = "endurance"      # resistencia aeróbica
     sweet_spot = "sweet_spot"    # sweet spot (sub-umbral)
@@ -123,7 +124,21 @@ def _steady(
     )
 
 
+_REST = WorkoutTemplate(
+    id="rest",
+    objective=Objective.rest,
+    name="Descanso total",
+    blocks=[],                       # sin bloques → 0 min, 0 TSS
+    description="Día libre: la recuperación pasiva es hoy el mejor entreno.",
+)
+
+
 LIBRARY: dict[Objective, WorkoutFamily] = {
+    Objective.rest: WorkoutFamily(
+        Objective.rest, "Descanso",
+        "Día libre para recuperar.",
+        [_REST],
+    ),
     Objective.recovery: WorkoutFamily(
         Objective.recovery, "Recuperación",
         "Rodaje muy suave para favorecer la recuperación.",

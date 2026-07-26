@@ -645,9 +645,12 @@ def plan_cmd(
         )
     typer.echo(f"  {plan.rationale}")
     typer.echo(f"  Duración ≈ {plan.template.total_minutes():.0f} min  (FTP {plan.ftp:.0f} W)")
-    typer.echo("  Bloques:")
-    for line in plan.targets:
-        typer.echo(f"    • {line}")
+    if plan.targets:
+        typer.echo("  Bloques:")
+        for line in plan.targets:
+            typer.echo(f"    • {line}")
+    else:
+        typer.echo("  (sin bloques — descanso)")
 
 
 # --------------------------------------------------------------------------- #
