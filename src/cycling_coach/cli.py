@@ -623,6 +623,7 @@ def tune_cri(
 @app.command("plan")
 def plan_cmd(
     athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+    minutes: float = typer.Option(None, help="Tiempo disponible hoy (min): ajusta la dosis."),
 ) -> None:
     """Sesión recomendada de hoy (objetivo → entrenamiento → explicación)."""
     from datetime import datetime
@@ -630,7 +631,7 @@ def plan_cmd(
     today = datetime.now(UTC).date()
     with session_scope() as session:
         athlete_id = _resolve_athlete_id(session, athlete_id)
-        plan = plan_today(session, athlete_id, today)
+        plan = plan_today(session, athlete_id, today, minutes=minutes)
     if plan is None:
         typer.secho("Falta el FTP. Ejecuta `cc estimate-cp` primero.", fg=typer.colors.YELLOW)
         raise typer.Exit(code=1)

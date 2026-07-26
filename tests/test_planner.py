@@ -13,7 +13,7 @@ from cycling_coach.planner import (
     plan_session,
     render_targets,
 )
-from cycling_coach.planner.library import LIBRARY, Objective
+from cycling_coach.planner.library import LIBRARY, Objective, select_template
 
 
 def _ctx(intensities: list[float], ramp=None, acwr=None, tss=None) -> TrainingContext:
@@ -41,10 +41,10 @@ def test_low_cri_forces_recovery_even_if_form_ok():
 
 
 def test_render_targets_scales_to_ftp():
-    template = LIBRARY[Objective.threshold]        # 3×10' @ 95–100%
+    template = select_template(Objective.threshold, fitness_pct=0.5)   # umbral @ 95–100%
     lines = render_targets(template, ftp=300.0)
-    # El bloque de intervalos: 95–100% de 300 = 285–300 W.
-    assert any("285" in ln and "300" in ln and "3×10" in ln for ln in lines)
+    # El bloque de intervalos al umbral: 95–100% de 300 = 285–300 W.
+    assert any("285" in ln and "300" in ln for ln in lines)
 
 
 def test_plan_session_produces_rationale_and_targets():
@@ -135,3 +135,46 @@ def test_personalization_flows_through_plan_session():
     # TSB −18: con defaults sería endurance; con su escala, algo más exigente.
     plan = plan_session(ftp=348.0, tsb=-18.0, cri=None, context=ctx)
     assert plan.objective in (Objective.sweet_spot, Objective.threshold)
+
+
+# --- Grieta 4: escalera de dosis (progresión + variantes) -------------------
+def test_families_have_ordered_dose_ladders():
+    for obj, fam in LIBRARY.items():
+        mins = [v.total_minutes() for v in fam.variants]
+        assert mins == sorted(mins), f"{obj} desordenada"
+        assert all(v.objective is obj for v in fam.variants)
+
+
+def test_fitness_scales_the_dose():
+    # Más en forma (percentil alto) ⇒ más dosis que menos en forma.
+    easy = select_template(Objective.sweet_spot, fitness_pct=0.0)
+    hard = select_template(Objective.sweet_spot, fitness_pct=1.0)
+    assert hard.total_minutes() > easy.total_minutes()
+
+
+def test_time_budget_caps_the_dose():
+    # Con menos tiempo, baja de escalón aunque estés en forma.
+    full = select_template(Objective.sweet_spot, fitness_pct=1.0)   # 4×15 ≈ 105'
+    short = select_template(Objective.sweet_spot, fitness_pct=1.0, minutes=80)
+    assert short.total_minutes() <= 80
+    assert short.total_minutes() < full.total_minutes()
+
+
+def test_time_budget_never_returns_empty():
+    # Aunque el tope sea absurdamente bajo, siempre da la variante más corta.
+    t = select_template(Objective.vo2max, fitness_pct=1.0, minutes=1)
+    assert t is LIBRARY[Objective.vo2max].variants[0]
+
+
+def test_dose_flows_through_plan_session():
+    # Fresco + budget holgado para VO2 → cabe la variante corta (~62').
+    ctx = TrainingContext(recent=[], fitness_pct=1.0)
+    plan = plan_session(ftp=348.0, tsb=12.0, cri=75.0, context=ctx, minutes=65)
+    assert plan.template.total_minutes() <= 65
+
+
+def test_tight_budget_flags_the_note():
+    # Budget imposible para calidad → da la más corta pero AVISA en el porqué.
+    ctx = TrainingContext(recent=[], fitness_pct=1.0)
+    plan = plan_session(ftp=348.0, tsb=12.0, cri=75.0, context=ctx, minutes=30)
+    assert "excede" in plan.rationale

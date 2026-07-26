@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-from cycling_coach.planner.library import LIBRARY, Objective, WorkoutTemplate
+from cycling_coach.planner.library import Objective, WorkoutTemplate, select_template
 
 # --- Grietas 1+2: mirar más allá del snapshot de hoy -------------------------
 # Orden de intensidad de los objetivos (para poder "rebajar" con seguridad).
@@ -54,7 +54,8 @@ class TrainingContext:
     ramp_rate: float | None = None       # CTL(hoy) − CTL(hace 7 d)
     acwr: float | None = None            # atl/ctl (agudo:crónico)
     recent: list[RecentDay] = field(default_factory=list)   # viejo→ayer
-    tsb_history: list[float] = field(default_factory=list)   # TSB histórico
+    tsb_history: list[float] = field(default_factory=list)   # TSB histórico (todo)
+    fitness_pct: float | None = None     # percentil del CTL actual (0–1)
 
     def yesterday_hard(self) -> bool:
         return bool(self.recent) and self.recent[-1].is_hard
@@ -218,27 +219,41 @@ def plan_session(
     atl: float | None = None,
     cri: float | None = None,
     context: TrainingContext | None = None,
+    minutes: float | None = None,
 ) -> PlannedSession:
     """Genera la sesión recomendada + explicación a partir del estado.
 
-    1) `choose_objective` decide lo que la FORMA de hoy pide (aspiración).
+    1) `choose_objective` decide lo que la FORMA de hoy pide (aspiración), con
+       umbrales personalizados (grieta 3).
     2) `apply_constraints` lo rebaja si la HISTORIA reciente o la dinámica de
-       carga lo desaconsejan (grietas 1+2). Ambas decisiones son explicables."""
+       carga lo desaconsejan (grietas 1+2).
+    3) `select_template` elige la DOSIS de la familia según la forma relativa
+       (percentil de CTL) y el tiempo disponible (grieta 4).
+    Todas las decisiones son explicables."""
     thresholds = None
-    if context is not None and context.tsb_history:
-        thresholds = FormThresholds.personalize(context.tsb_history)
+    fitness_pct = None
+    if context is not None:
+        if context.tsb_history:
+            thresholds = FormThresholds.personalize(context.tsb_history)
+        fitness_pct = context.fitness_pct
+
     aspired, reason = choose_objective(tsb, ctl, atl, cri, thresholds)
     objective, adjust = (aspired, None)
     if context is not None:
         objective, adjust = apply_constraints(aspired, context)
 
-    template = LIBRARY[objective]
+    template = select_template(objective, fitness_pct, minutes)
     rationale = (
         f"Objetivo: {objective.value} — {reason} "
         f"Sesión: {template.name} ({template.description})"
     )
     if adjust:
         rationale += f" [{adjust}]"
+    if minutes is not None and template.total_minutes() > minutes:
+        rationale += (
+            f" [nota: la sesión más corta de calidad ({template.total_minutes():.0f}') "
+            f"excede tus {minutes:.0f}' — considera partirla o bajar el objetivo]"
+        )
     return PlannedSession(
         objective=objective,
         template=template,

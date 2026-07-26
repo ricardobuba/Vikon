@@ -13,12 +13,15 @@ from cycling_coach.twin.cri_service import compute_cri_service
 from cycling_coach.twin.load_service import build_training_context
 
 
-def plan_today(session: Session, athlete_id: int, as_of: date) -> PlannedSession | None:
+def plan_today(
+    session: Session, athlete_id: int, as_of: date, minutes: float | None = None
+) -> PlannedSession | None:
     """Sesión recomendada para `as_of`. None si falta el FTP (correr estimate-cp).
 
     Reúne el estado de forma (TSB/CTL/ATL) Y el contexto temporal (historia
-    reciente + ramp rate) en una sola pasada, para que la capa de seguridad
-    (grietas 1+2) pueda rebajar el objetivo si la historia lo desaconseja."""
+    completa + ramp rate + forma relativa) en una sola pasada, para que la capa
+    de seguridad (grietas 1+2), los umbrales personalizados (grieta 3) y la
+    selección de dosis (grieta 4) tengan todo lo que necesitan."""
     ftp = latest_parameter_estimate(session, athlete_id, "ftp")
     if not ftp:
         return None
@@ -32,5 +35,5 @@ def plan_today(session: Session, athlete_id: int, as_of: date) -> PlannedSession
     cri = cri_detail.result.cri if cri_detail else None
 
     return plan_session(
-        ftp=ftp, tsb=tsb, ctl=ctl, atl=atl, cri=cri, context=ctx
+        ftp=ftp, tsb=tsb, ctl=ctl, atl=atl, cri=cri, context=ctx, minutes=minutes
     )

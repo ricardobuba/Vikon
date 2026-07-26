@@ -156,12 +156,23 @@ def build_training_context(
         tss, inten = dli.get(d, (0.0, 0.0))
         recent.append(RecentDay(day=d, tss=tss, intensity=inten))
 
-    # Distribución de TSB del último año → umbrales personalizados (grieta 3).
-    year_ago = as_of - timedelta(days=365)
-    tsb_history = [p.tsb for p in series if year_ago <= p.day <= as_of]
+    # TODA la historia (no solo el último año): umbrales de forma (grieta 3) y
+    # forma relativa para la dosis (grieta 4). El atleta puede haber cambiado de
+    # volumen entre años; usar todo capta su capacidad real de largo plazo.
+    past = [p for p in series if p.day <= as_of]
+    tsb_history = [p.tsb for p in past]
+    ctl_history = sorted(p.ctl for p in past)
+    fitness_pct = None
+    if ctl_history:
+        below = sum(1 for c in ctl_history if c <= current.ctl)
+        fitness_pct = below / len(ctl_history)
 
     return current, TrainingContext(
-        ramp_rate=ramp, acwr=acwr, recent=recent, tsb_history=tsb_history
+        ramp_rate=ramp,
+        acwr=acwr,
+        recent=recent,
+        tsb_history=tsb_history,
+        fitness_pct=fitness_pct,
     )
 
 
