@@ -224,3 +224,23 @@ def test_taper_reduces_dose_not_objective():
 def test_phase_shown_in_rationale():
     plan = plan_session(ftp=348.0, tsb=0.0, phase=Phase.build, days_to_event=60)
     assert "fase build" in plan.rationale and "meta en 60" in plan.rationale
+
+
+# --- Grieta 6: la simulación guía la dosis en plan_session -------------------
+def test_simulation_engages_when_state_known():
+    # Con CTL/ATL, la dosis se elige por simulación y se explica.
+    plan = plan_session(ftp=348.0, tsb=8.0, ctl=60.0, atl=52.0, cri=60.0)
+    assert "simulado" in plan.rationale and "mañana TSB" in plan.rationale
+
+
+def test_simulation_prefers_bigger_stimulus_when_fresh():
+    # Muy fresco (poca fatiga) → mayor dosis que ya fatigado, mismo objetivo.
+    fresh = plan_session(ftp=348.0, tsb=6.0, ctl=60.0, atl=45.0, cri=60.0)
+    tired = plan_session(ftp=348.0, tsb=6.0, ctl=60.0, atl=70.0, cri=60.0)
+    assert fresh.template.total_minutes() >= tired.template.total_minutes()
+
+
+def test_no_simulation_without_state():
+    # Sin CTL/ATL, cae al heurístico y no habla de simulación.
+    plan = plan_session(ftp=348.0, tsb=8.0, cri=60.0)
+    assert "simulado" not in plan.rationale

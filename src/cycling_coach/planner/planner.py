@@ -14,7 +14,13 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
 
-from cycling_coach.planner.library import Objective, WorkoutTemplate, select_template
+from cycling_coach.planner.library import (
+    LIBRARY,
+    Objective,
+    WorkoutTemplate,
+    select_template,
+)
+from cycling_coach.planner.simulator import choose_dose_by_simulation
 
 
 # --- Grieta 5: meta/evento → fase de temporada (horizonte) -------------------
@@ -297,9 +303,31 @@ def plan_session(
         objective, adjust = apply_constraints(aspired, context)
     objective, phase_note = apply_phase(objective, phase)
 
-    template = select_template(
-        objective, fitness_pct, minutes, level_offset=phase_level_offset(phase)
-    )
+    # Dosis: si conocemos el estado (CTL/ATL), SIMULAMOS cada variante y elegimos
+    # el mayor estímulo que el modelo predice seguro (grieta 6). Si no, heurístico.
+    offset = phase_level_offset(phase)
+    sim_note = None
+    if ctl is not None and atl is not None:
+        n = len(LIBRARY[objective].variants)
+        max_level = max(0, (n - 1) + offset)
+        floor = (thresholds or FormThresholds()).recovery_below
+        choice = choose_dose_by_simulation(
+            objective, ctl, atl, floor, minutes=minutes, max_level=max_level
+        )
+        template = choice.template
+        o = choice.outcome
+        rej = (
+            f", {choice.rejected_unsafe} descartadas por forma"
+            if choice.rejected_unsafe else ""
+        )
+        sim_note = (
+            f"simulado: mañana TSB {o.tsb_tomorrow:+.0f}, CTL {o.ctl_gain:+.1f} "
+            f"({choice.considered} variantes{rej})"
+        )
+        if not choice.safe:
+            sim_note += " [ninguna dentro de tu rango: la más suave]"
+    else:
+        template = select_template(objective, fitness_pct, minutes, level_offset=offset)
 
     rationale = ""
     if phase is not Phase.off:
@@ -313,6 +341,8 @@ def plan_session(
         rationale += f" [{adjust}]"
     if phase_note:
         rationale += f" [{phase_note}]"
+    if sim_note:
+        rationale += f" [{sim_note}]"
     if minutes is not None and template.total_minutes() > minutes:
         rationale += (
             f" [nota: la sesión más corta de calidad ({template.total_minutes():.0f}') "
