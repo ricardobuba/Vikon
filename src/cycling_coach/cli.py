@@ -25,6 +25,9 @@ from cycling_coach.adapters.strava.oauth import (
     exchange_code,
 )
 from cycling_coach.adapters.strava.source import StravaSource
+from cycling_coach.assistant.assistant import ask as assistant_ask
+from cycling_coach.assistant.assistant import explain_today
+from cycling_coach.assistant.llm import LLMError
 from cycling_coach.config import get_settings
 from cycling_coach.db.engine import get_engine, session_scope
 from cycling_coach.db.models import Activity, Athlete, Base, DailyMetric, Stream
@@ -651,6 +654,68 @@ def plan_cmd(
             typer.echo(f"    • {line}")
     else:
         typer.echo("  (sin bloques — descanso)")
+
+
+# --------------------------------------------------------------------------- #
+@app.command("explain")
+def explain_cmd(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """Narra el plan de hoy en lenguaje natural (el LLM redacta, no decide)."""
+    from datetime import datetime
+
+    today = datetime.now(UTC).date()
+    try:
+        with session_scope() as session:
+            athlete_id = _resolve_athlete_id(session, athlete_id)
+            reply = explain_today(session, athlete_id, today)
+    except LLMError as exc:
+        typer.secho(str(exc), fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1) from exc
+    typer.secho("Vikon:", fg=typer.colors.CYAN, bold=True)
+    typer.echo(f"  {reply.text}")
+
+
+@app.command("ask")
+def ask_cmd(
+    message: str = typer.Argument(..., help="Lo que quieras decirle a Vikon."),
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+    show_plan: bool = typer.Option(False, "--plan", help="Muestra también el plan determinista."),
+) -> None:
+    """Habla con Vikon: traduce tu mensaje → el motor decide → te lo explica.
+
+    Ej.: cc ask "solo tengo 40 min y me siento reventado"
+    """
+    from datetime import datetime
+
+    today = datetime.now(UTC).date()
+    try:
+        with session_scope() as session:
+            athlete_id = _resolve_athlete_id(session, athlete_id)
+            reply = assistant_ask(session, athlete_id, today, message)
+            plan = reply.facts.plan
+            plan_line = None
+            if show_plan and plan is not None:
+                plan_line = (
+                    f"{plan.objective.value} — {plan.template.name} "
+                    f"({plan.template.total_minutes():.0f} min)"
+                )
+    except LLMError as exc:
+        typer.secho(str(exc), fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1) from exc
+
+    it = reply.intent
+    interp = []
+    if it.minutes is not None:
+        interp.append(f"{it.minutes:.0f} min")
+    if it.readiness:
+        interp.append(f"disposición {it.readiness}")
+    if interp:
+        typer.secho(f"(interpreté: {', '.join(interp)})", fg=typer.colors.BRIGHT_BLACK)
+    typer.secho("Vikon:", fg=typer.colors.CYAN, bold=True)
+    typer.echo(f"  {reply.text}")
+    if plan_line:
+        typer.secho(f"  → plan: {plan_line}", fg=typer.colors.BRIGHT_BLACK)
 
 
 # --------------------------------------------------------------------------- #

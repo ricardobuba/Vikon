@@ -20,14 +20,22 @@ from cycling_coach.twin.load_service import build_training_context
 
 
 def plan_today(
-    session: Session, athlete_id: int, as_of: date, minutes: float | None = None
+    session: Session,
+    athlete_id: int,
+    as_of: date,
+    minutes: float | None = None,
+    cri_override: float | None = None,
 ) -> PlannedSession | None:
     """Sesión recomendada para `as_of`. None si falta el FTP (correr estimate-cp).
 
     Reúne el estado de forma (TSB/CTL/ATL) Y el contexto temporal (historia
     completa + ramp rate + forma relativa) en una sola pasada, para que la capa
     de seguridad (grietas 1+2), los umbrales personalizados (grieta 3) y la
-    selección de dosis (grieta 4) tengan todo lo que necesitan."""
+    selección de dosis (grieta 4) tengan todo lo que necesitan.
+
+    `cri_override`: disposición subjetiva (0–100) que la capa conversacional
+    deriva de cómo dices sentirte hoy — sustituye al CRI calculado, de forma
+    determinista (el LLM traduce; el planner decide)."""
     ftp = latest_parameter_estimate(session, athlete_id, "ftp")
     if not ftp:
         return None
@@ -37,8 +45,11 @@ def plan_today(
     ctl = current.ctl if current else None
     atl = current.atl if current else None
 
-    cri_detail = compute_cri_service(session, athlete_id, as_of)
-    cri = cri_detail.result.cri if cri_detail else None
+    if cri_override is not None:
+        cri = cri_override
+    else:
+        cri_detail = compute_cri_service(session, athlete_id, as_of)
+        cri = cri_detail.result.cri if cri_detail else None
 
     # Horizonte: si hay un evento futuro, su cercanía define la fase (grieta 5).
     goal = next_goal(session, athlete_id, as_of)
