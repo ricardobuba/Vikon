@@ -47,6 +47,7 @@ from cycling_coach.oauth_loopback import wait_for_code
 from cycling_coach.planner.service import plan_horizon, plan_today
 from cycling_coach.twin import build_state
 from cycling_coach.twin import estimate_cp as estimate_cp_service
+from cycling_coach.twin.coherence_service import assess_cp_coherence
 from cycling_coach.twin.cp_estimation import CPEstimationResult
 from cycling_coach.twin.cp_estimation import backtest as backtest_service
 from cycling_coach.twin.cp_estimation import tune as tune_service
@@ -716,6 +717,41 @@ def ask_cmd(
     typer.echo(f"  {reply.text}")
     if plan_line:
         typer.secho(f"  → plan: {plan_line}", fg=typer.colors.BRIGHT_BLACK)
+
+
+# --------------------------------------------------------------------------- #
+@app.command("coherence")
+def coherence_cmd(
+    days: int = typer.Option(120, help="Ventana reciente (días) de esfuerzos a contrastar."),
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """Coherencia/maximalidad del CP: contrasta el CP/W' vigente con tus
+    esfuerzos reales recientes (avisa si está obsoleto o sin confirmar)."""
+    from datetime import datetime
+
+    today = datetime.now(UTC).date()
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        report = assess_cp_coherence(session, athlete_id, today, days=days)
+    if report is None:
+        typer.secho("Falta CP/W' o no hay potencia reciente. Corre `cc estimate-cp`.",
+                    fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+
+    typer.secho(
+        f"Coherencia del CP ({report.cp:.0f} W, W' {report.w_prime / 1000:.1f} kJ) "
+        f"— últimos {days} días",
+        fg=typer.colors.CYAN, bold=True,
+    )
+    typer.echo(f"  {'dur':>6} {'real':>7} {'modelo':>7} {'ratio':>6}")
+    for c in report.checks:
+        mark = "  <-- supera" if c.exceeds else ""
+        dur = f"{c.seconds // 60}min" if c.seconds >= 60 else f"{c.seconds}s"
+        ratio = f"{c.ratio * 100:.0f}%" if c.ratio else "—"
+        actual = f"{c.actual:.0f}" if c.actual else "—"
+        typer.echo(f"  {dur:>6} {actual:>7} {c.predicted:>7.0f} {ratio:>6}{mark}")
+    color = typer.colors.RED if report.violations else typer.colors.GREEN
+    typer.secho(f"\n  {report.verdict}", fg=color)
 
 
 # --------------------------------------------------------------------------- #
