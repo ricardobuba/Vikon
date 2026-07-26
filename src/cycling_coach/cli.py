@@ -41,7 +41,7 @@ from cycling_coach.db.repositories import (
 from cycling_coach.domain.models import CanonicalDailyMetric, Estimate
 from cycling_coach.ingest import backfill as run_backfill
 from cycling_coach.oauth_loopback import wait_for_code
-from cycling_coach.planner.service import plan_today
+from cycling_coach.planner.service import plan_horizon, plan_today
 from cycling_coach.twin import build_state
 from cycling_coach.twin import estimate_cp as estimate_cp_service
 from cycling_coach.twin.cp_estimation import CPEstimationResult
@@ -648,6 +648,45 @@ def plan_cmd(
     typer.echo("  Bloques:")
     for line in plan.targets:
         typer.echo(f"    • {line}")
+
+
+# --------------------------------------------------------------------------- #
+@app.command("horizon")
+def horizon_cmd(
+    days: int = typer.Option(7, help="Días a proyectar."),
+    minutes: float = typer.Option(None, help="Tiempo disponible por día (min)."),
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """Microciclo proyectado (rollout simulado). Solo HOY se compromete; el
+    resto se re-planifica al llegar datos reales (horizonte deslizante)."""
+    from datetime import datetime
+
+    today = datetime.now(UTC).date()
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        horizon = plan_horizon(session, athlete_id, today, days=days, minutes=minutes)
+    if not horizon:
+        typer.secho("Falta FTP o carga. Ejecuta `cc estimate-cp` y `cc compute-load`.",
+                    fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+
+    typer.secho(f"Horizonte {days} días (solo hoy se compromete):",
+                fg=typer.colors.CYAN, bold=True)
+    for i, h in enumerate(horizon):
+        tag = "HOY" if i == 0 else h.day.strftime("%a")
+        ph = f" · {h.phase.value}" if h.phase.value != "off" else ""
+        typer.echo(
+            f"  {tag:>4} {h.day.isoformat()}  TSB {h.tsb:+5.1f}{ph}  "
+            f"→ {h.plan.objective.value:<10} {h.plan.template.name:<18} "
+            f"(TSS~{h.tss:.0f}, {h.plan.template.total_minutes():.0f}')"
+        )
+    total = sum(h.tss for h in horizon)
+    end_ctl = horizon[-1].ctl
+    typer.echo(
+        f"  Σ TSS {total:.0f} · CTL {horizon[0].ctl:.0f}→{end_ctl:.0f} "
+        f"· TSB final proyectado {horizon[-1].tsb:+.0f}"
+    )
+    typer.secho(f"\n  Hoy en detalle:\n    {horizon[0].plan.rationale}", dim=True)
 
 
 # --------------------------------------------------------------------------- #

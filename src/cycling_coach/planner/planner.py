@@ -10,8 +10,8 @@ scoring es Fase 4.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import date
+from dataclasses import dataclass, field, replace
+from datetime import date, timedelta
 from enum import StrEnum
 
 from cycling_coach.planner.library import (
@@ -20,7 +20,12 @@ from cycling_coach.planner.library import (
     WorkoutTemplate,
     select_template,
 )
-from cycling_coach.planner.simulator import choose_dose_by_simulation
+from cycling_coach.planner.simulator import (
+    choose_dose_by_simulation,
+    estimate_session_tss,
+    session_intensity,
+    simulate_next_day,
+)
 
 
 # --- Grieta 5: meta/evento → fase de temporada (horizonte) -------------------
@@ -88,6 +93,7 @@ class TrainingContext:
     recent: list[RecentDay] = field(default_factory=list)   # viejo→ayer
     tsb_history: list[float] = field(default_factory=list)   # TSB histórico (todo)
     fitness_pct: float | None = None     # percentil del CTL actual (0–1)
+    ctl_window: list[float] = field(default_factory=list)    # últimos ~8 CTL (viejo→hoy)
 
     def yesterday_hard(self) -> bool:
         return bool(self.recent) and self.recent[-1].is_hard
@@ -356,3 +362,67 @@ def plan_session(
         targets=render_targets(template, ftp),
         aspired=aspired if objective is not aspired else None,
     )
+
+
+# --- Horizonte deslizante (rollout multi-día simulado) -----------------------
+@dataclass
+class HorizonDay:
+    day: date
+    tsb: float                 # forma ANTES del entreno de ese día
+    ctl: float
+    atl: float
+    phase: Phase
+    plan: PlannedSession
+    tss: float                 # TSS previsto de la sesión elegida
+
+
+def roll_horizon(
+    ftp: float,
+    ctl: float,
+    atl: float,
+    context: TrainingContext,
+    cri: float | None = None,
+    days: int = 7,
+    start: date | None = None,
+    days_to_event: int | None = None,
+    minutes: float | None = None,
+) -> list[HorizonDay]:
+    """Proyecta `days` días encadenando `plan_session` y ARRASTRANDO el estado
+    simulado (CTL/ATL) y la historia (duro/fácil emergente). Voraz por diseño:
+    cada día usa la misma lógica explicable; no optimiza la secuencia global
+    (nuestro modelo dosis→respuesta es demasiado débil para justificarlo).
+
+    Solo el día 0 se compromete; el resto es una proyección que se re-planifica
+    al llegar datos reales (de ahí "deslizante"). La CRI es una señal de HOY: no
+    la proyectamos (los días futuros deciden solo por forma)."""
+    start = start or (context.recent[-1].day + timedelta(days=1) if context.recent else date.min)
+    recent = list(context.recent)
+    window = list(context.ctl_window) or [ctl]
+
+    out: list[HorizonDay] = []
+    for i in range(days):
+        day = start + timedelta(days=i)
+        tsb = ctl - atl
+        dte = (days_to_event - i) if days_to_event is not None else None
+        phase = phase_for(dte)
+
+        ramp = ctl - window[-8] if len(window) >= 8 else context.ramp_rate
+        acwr = (atl / ctl) if ctl > 0 else None
+        day_ctx = replace(
+            context, recent=recent[-14:], ramp_rate=ramp, acwr=acwr
+        )
+        plan = plan_session(
+            ftp=ftp, tsb=tsb, ctl=ctl, atl=atl,
+            cri=(cri if i == 0 else None),          # CRI solo es fiable hoy
+            context=day_ctx, minutes=minutes,
+            phase=phase, days_to_event=dte,
+        )
+        tss = estimate_session_tss(plan.template)
+        out.append(HorizonDay(day, tsb, ctl, atl, phase, plan, tss))
+
+        # Avanzar el estado simulado y la historia para el día siguiente.
+        sim = simulate_next_day(ctl, atl, tss)
+        ctl, atl = sim.ctl_after, sim.atl_after
+        window.append(ctl)
+        recent.append(RecentDay(day, tss, session_intensity(plan.template)))
+    return out

@@ -35,6 +35,15 @@ def estimate_session_tss(t: WorkoutTemplate) -> float:
     return tss
 
 
+def session_intensity(t: WorkoutTemplate) -> float:
+    """IF representativo de la sesión = el bloque más intenso (los intervalos
+    mandan; el calentamiento no cuenta). Sirve para clasificar duro/fácil al
+    rodar el horizonte, coherente con RecentDay.is_hard."""
+    if not t.blocks:
+        return 0.0
+    return max((b.low_pct + b.high_pct) / 200.0 for b in t.blocks)
+
+
 @dataclass
 class SimOutcome:
     tss: float

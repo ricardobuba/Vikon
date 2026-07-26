@@ -15,8 +15,12 @@ from cycling_coach.planner import (
     phase_for,
     plan_session,
     render_targets,
+    roll_horizon,
 )
 from cycling_coach.planner.library import LIBRARY, Objective, select_template
+from cycling_coach.planner.simulator import session_intensity
+
+_HARD = {Objective.sweet_spot, Objective.threshold, Objective.vo2max}
 
 
 def _ctx(intensities: list[float], ramp=None, acwr=None, tss=None) -> TrainingContext:
@@ -244,3 +248,53 @@ def test_no_simulation_without_state():
     # Sin CTL/ATL, cae al heurístico y no habla de simulación.
     plan = plan_session(ftp=348.0, tsb=8.0, cri=60.0)
     assert "simulado" not in plan.rationale
+
+
+# --- G7: horizonte deslizante -----------------------------------------------
+def _horizon_ctx() -> TrainingContext:
+    return TrainingContext(recent=[], fitness_pct=1.0, tsb_history=[], ctl_window=[60.0] * 8)
+
+
+def test_horizon_length_and_consecutive_dates():
+    h = roll_horizon(
+        ftp=348.0, ctl=55.0, atl=50.0, context=_horizon_ctx(),
+        cri=None, days=7, start=date(2026, 7, 26),
+    )
+    assert len(h) == 7
+    assert [d.day for d in h] == [date(2026, 7, 26) + timedelta(days=i) for i in range(7)]
+
+
+def test_horizon_state_evolves():
+    h = roll_horizon(
+        ftp=348.0, ctl=50.0, atl=40.0, context=_horizon_ctx(),
+        days=5, start=date(2026, 7, 26),
+    )
+    assert len({round(d.ctl, 3) for d in h}) > 1     # el CTL cambia día a día
+    assert all(d.tss >= 0 for d in h)
+
+
+def test_horizon_alternates_hard_easy():
+    # La alternancia EMERGE del simulador + regla duro/fácil: nunca 2 días duros
+    # seguidos (tras un duro, el estado y la historia fuerzan uno suave).
+    h = roll_horizon(
+        ftp=348.0, ctl=60.0, atl=40.0, context=_horizon_ctx(),
+        cri=80.0, days=7, start=date(2026, 7, 26),
+    )
+    hard = [session_intensity(d.plan.template) >= 0.85 for d in h]
+    assert any(hard)                                  # hay días de calidad
+    assert not any(hard[i] and hard[i + 1] for i in range(len(hard) - 1))
+
+
+def test_horizon_tapers_toward_event():
+    # Con un evento cercano, los últimos días entran en taper/carrera → menos
+    # carga total que sin evento.
+    far = roll_horizon(
+        ftp=348.0, ctl=60.0, atl=45.0, context=_horizon_ctx(),
+        cri=70.0, days=7, start=date(2026, 7, 26), days_to_event=None,
+    )
+    near = roll_horizon(
+        ftp=348.0, ctl=60.0, atl=45.0, context=_horizon_ctx(),
+        cri=70.0, days=7, start=date(2026, 7, 26), days_to_event=8,
+    )
+    assert sum(d.tss for d in near) < sum(d.tss for d in far)
+    assert near[-1].phase in (Phase.race, Phase.taper)

@@ -144,9 +144,22 @@ def build_training_context(
 
     series = compute_ctl_atl_tsb({d: v[0] for d, v in dli.items()})
     by_day = {p.day: p for p in series}
-    current = by_day.get(as_of, series[-1])
 
-    week_ago = by_day.get(as_of - timedelta(days=7))
+    # Estado para PLANEAR hoy = mañana de `as_of` (fin de ayer), ANTES del
+    # entreno de hoy. `LoadPoint(as_of)` guarda ctl/atl de FIN de día; usarlos
+    # como base subestimaría la fatiga (un día extra de decaimiento) y haría que
+    # el TSB del horizonte no cuadrara con el de `cc plan`. Tomamos el fin de
+    # ayer, cuyo ctl−atl es exactamente el TSB matinal de hoy.
+    end_of_day = by_day.get(as_of, series[-1])
+    prev = by_day.get(as_of - timedelta(days=1))
+    if prev is not None:
+        current = LoadPoint(
+            day=as_of, ctl=prev.ctl, atl=prev.atl, tsb=prev.ctl - prev.atl
+        )
+    else:
+        current = end_of_day
+
+    week_ago = by_day.get(as_of - timedelta(days=8))    # 7 días antes (mañana→mañana)
     ramp = (current.ctl - week_ago.ctl) if week_ago else None
     acwr = (current.atl / current.ctl) if current.ctl > 0 else None
 
@@ -167,12 +180,17 @@ def build_training_context(
         below = sum(1 for c in ctl_history if c <= current.ctl)
         fitness_pct = below / len(ctl_history)
 
+    # Últimos ~8 CTL hasta fin de ayer (coherente con la base matinal): ramp
+    # rate durante el rollout del horizonte.
+    ctl_window = [p.ctl for p in past if p.day < as_of][-8:]
+
     return current, TrainingContext(
         ramp_rate=ramp,
         acwr=acwr,
         recent=recent,
         tsb_history=tsb_history,
         fitness_pct=fitness_pct,
+        ctl_window=ctl_window,
     )
 
 

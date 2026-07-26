@@ -2,6 +2,7 @@
 
 from cycling_coach.planner.planner import (
     FormThresholds,
+    HorizonDay,
     Phase,
     PlannedSession,
     RecentDay,
@@ -12,10 +13,12 @@ from cycling_coach.planner.planner import (
     phase_for,
     plan_session,
     render_targets,
+    roll_horizon,
 )
 
 __all__ = [
     "FormThresholds",
+    "HorizonDay",
     "Phase",
     "PlannedSession",
     "RecentDay",
@@ -26,4 +29,5 @@ __all__ = [
     "phase_for",
     "plan_session",
     "render_targets",
+    "roll_horizon",
 ]
