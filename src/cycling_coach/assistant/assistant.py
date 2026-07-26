@@ -91,9 +91,11 @@ class ChatSession:
     """Conversación multivuelta con Vikon. Mantiene el historial y una intención
     PEGAJOSA: los minutos y la disposición persisten hasta que los cambies (así
     "40 min" seguido de "¿por qué?" sigue hablando del plan de 40 min). La ficha
-    se recalcula cada vuelta con el estado vigente — el motor siempre decide."""
+    se recalcula cada vuelta con el estado vigente — el motor siempre decide.
 
-    session: Session
+    No retiene la sesión de BD (se pasa por turno) para servir también a la web,
+    donde cada petición usa una conexión fresca."""
+
     athlete_id: int
     as_of: date
     llm: LLMClient
@@ -101,7 +103,7 @@ class ChatSession:
     readiness: str | None = None
     history: list[dict[str, str]] = field(default_factory=list)
 
-    def turn(self, message: str) -> Reply:
+    def turn(self, session: Session, message: str) -> Reply:
         intent = parse_intent(self.llm, message)
         if intent.minutes is not None:
             self.minutes = intent.minutes
@@ -110,7 +112,7 @@ class ChatSession:
         cri_override = _READINESS_CRI.get(self.readiness or "")
 
         facts = gather_facts(
-            self.session, self.athlete_id, self.as_of,
+            session, self.athlete_id, self.as_of,
             minutes=self.minutes, cri_override=cri_override,
         )
         system = f"{EXPLAIN_SYSTEM}\n\nFICHA ACTUAL (única fuente de cifras):\n{facts.to_prompt()}"

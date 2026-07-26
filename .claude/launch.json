@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "vikon-web",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "uvicorn", "cycling_coach.web.api:app", "--port", "8730"],
+      "port": 8730
+    }
+  ]
+}

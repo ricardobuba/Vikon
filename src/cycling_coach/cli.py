@@ -720,6 +720,19 @@ def ask_cmd(
 
 
 # --------------------------------------------------------------------------- #
+@app.command("serve")
+def serve_cmd(
+    port: int = typer.Option(8730, help="Puerto del servidor web."),
+    host: str = typer.Option("127.0.0.1", help="Host."),
+) -> None:
+    """Lanza la UI web (FastAPI) — pantalla Hoy + horizonte + chat con Vikon."""
+    import uvicorn
+
+    typer.secho(f"Vikon en http://{host}:{port}", fg=typer.colors.CYAN, bold=True)
+    uvicorn.run("cycling_coach.web.api:app", host=host, port=port, reload=False)
+
+
+# --------------------------------------------------------------------------- #
 @app.command("coherence")
 def coherence_cmd(
     days: int = typer.Option(120, help="Ventana reciente (días) de esfuerzos a contrastar."),
@@ -776,7 +789,7 @@ def chat_cmd(
     typer.secho("Vikon — chat. Escribe 'salir' para terminar.\n", fg=typer.colors.CYAN, bold=True)
     with session_scope() as session:
         athlete_id = _resolve_athlete_id(session, athlete_id)
-        chat = ChatSession(session, athlete_id, today, llm)
+        chat = ChatSession(athlete_id, today, llm)
         while True:
             try:
                 msg = typer.prompt("Tú")
@@ -787,7 +800,7 @@ def chat_cmd(
             if not msg.strip():
                 continue
             try:
-                reply = chat.turn(msg)
+                reply = chat.turn(session, msg)
             except LLMError as exc:
                 typer.secho(f"  (error del LLM: {exc})", fg=typer.colors.YELLOW)
                 continue

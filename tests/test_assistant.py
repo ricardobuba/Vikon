@@ -132,11 +132,11 @@ def test_chat_sticky_intent(monkeypatch):
         return Facts(as_of=as_of)
 
     monkeypatch.setattr(A, "gather_facts", _fake_gather)
-    chat = A.ChatSession(session=None, athlete_id=1, as_of=date(2026, 7, 26), llm=_LLM())
+    chat = A.ChatSession(athlete_id=1, as_of=date(2026, 7, 26), llm=_LLM())
 
-    chat.turn("solo tengo 40 min")
-    chat.turn("¿por qué?")            # sin minutos nuevos → 40 pegajoso
-    chat.turn("y si me siento fuerte")  # readiness high, 40 sigue
+    chat.turn(None, "solo tengo 40 min")
+    chat.turn(None, "¿por qué?")            # sin minutos nuevos → 40 pegajoso
+    chat.turn(None, "y si me siento fuerte")  # readiness high, 40 sigue
 
     assert calls["minutes"] == [40.0, 40.0, 40.0]        # minutos persisten
     assert calls["cri"] == [None, None, 80.0]            # readiness solo al final

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Vikon</title>
+  <link rel="icon" href="/static/isotipo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <img src="/static/logo.png" alt="Vikon" />
+      <div class="brand"><span>Vikon</span></div>
+      <div class="date" id="today"></div>
+    </header>
+
+    <main>
+      <!-- HOY -->
+      <section id="home-view">
+        <div id="home-content"><div class="loading">Cargando tu estado…</div></div>
+      </section>
+
+      <!-- HORIZONTE -->
+      <section id="horizon-view" style="display:none">
+        <div class="section-title">Próximos 7 días (solo hoy se compromete)</div>
+        <div id="horizon-content"><div class="loading">Simulando…</div></div>
+      </section>
+
+      <!-- CHAT -->
+      <section id="chat-view">
+        <div class="chat-log" id="chat-log">
+          <div class="msg bot">¡Hola! Soy Vikon. Pregúntame qué toca hoy, dime cuánto tiempo tienes o cómo te encuentras.</div>
+        </div>
+      </section>
+    </main>
+
+    <div class="chat-input" id="chat-input">
+      <input id="chat-text" placeholder="Escribe a Vikon…" autocomplete="off" />
+      <button id="chat-send">➤</button>
+    </div>
+
+    <nav>
+      <button data-view="home" class="active"><span class="ico">🏠</span>Hoy</button>
+      <button data-view="horizon"><span class="ico">📈</span>Horizonte</button>
+      <button data-view="chat"><span class="ico">💬</span>Vikon</button>
+    </nav>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
