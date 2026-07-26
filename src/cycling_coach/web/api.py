@@ -23,6 +23,7 @@ from cycling_coach.db.engine import session_scope
 from cycling_coach.db.models import Athlete
 from cycling_coach.planner.planner import PlannedSession
 from cycling_coach.planner.service import plan_horizon
+from cycling_coach.sync import SyncError, sync_recent
 from cycling_coach.twin.coherence_service import assess_cp_coherence
 
 _STATIC = Path(__file__).parent / "static"
@@ -119,6 +120,20 @@ def create_app() -> FastAPI:
                  "predicted": round(c.predicted), "ratio": c.ratio, "exceeds": c.exceeds}
                 for c in r.checks
             ],
+        }
+
+    @app.post("/api/refresh")
+    def refresh() -> dict[str, Any]:
+        """Sincroniza las actividades nuevas de Strava (incremental). La llama la
+        app al abrir → el plan refleja la salida de hoy sin backfill manual."""
+        try:
+            r = sync_recent(fetch_streams=True)
+        except SyncError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        return {
+            "new": r.activities_ingested,
+            "streams": r.streams_ingested,
+            "skipped": r.skipped_existing,
         }
 
     @app.post("/api/chat")

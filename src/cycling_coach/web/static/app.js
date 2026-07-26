@@ -116,9 +116,19 @@ async function loadHorizon() {
   catch (e) { $("#horizon-content").innerHTML = `<div class="loading">${e.detail || "Error."}</div>`; }
 }
 
+// --- Sincronización automática al abrir (trae la salida de hoy sin backfill manual) ---
+async function syncThenLoad() {
+  $("#home-content").innerHTML = `<div class="loading">Sincronizando con Strava…</div>`;
+  try {
+    const r = await api("/api/refresh", { method: "POST" });
+    if (r.new > 0) horizonLoaded = false;   // hay datos nuevos → recalcular horizonte
+  } catch (_) { /* sin conexión/credenciales: seguimos con lo que haya en BD */ }
+  loadHome();
+}
+
 // --- Init ---
 $("#today").textContent = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short" });
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => show(b.dataset.view)));
 $("#chat-send").addEventListener("click", sendChat);
 $("#chat-text").addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
-loadHome();
+syncThenLoad();

@@ -720,6 +720,31 @@ def ask_cmd(
 
 
 # --------------------------------------------------------------------------- #
+@app.command("sync")
+def sync_cmd(
+    no_streams: bool = typer.Option(
+        False, "--no-streams", help="No descargar streams (más rápido)."
+    ),
+) -> None:
+    """Sincroniza SOLO lo nuevo desde tu última actividad (incremental, rápido).
+
+    Ideal para una tarea programada (cron / Programador de tareas de Windows).
+    Es el `backfill` en pequeño: la app lo llama sola al abrir."""
+    from cycling_coach.sync import SyncError, sync_recent
+
+    try:
+        r = sync_recent(fetch_streams=not no_streams)
+    except SyncError as exc:
+        typer.secho(str(exc), fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1) from exc
+    typer.secho(
+        f"Sincronizado ✔  nuevas={r.activities_ingested}  "
+        f"streams={r.streams_ingested}  ya_existentes={r.skipped_existing}",
+        fg=typer.colors.GREEN,
+    )
+
+
+# --------------------------------------------------------------------------- #
 @app.command("serve")
 def serve_cmd(
     port: int = typer.Option(8730, help="Puerto del servidor web."),
