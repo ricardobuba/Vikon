@@ -635,6 +635,11 @@ def plan_cmd(
         typer.secho("Falta el FTP. Ejecuta `cc estimate-cp` primero.", fg=typer.colors.YELLOW)
         raise typer.Exit(code=1)
     typer.secho(f"Plan de hoy — {plan.template.name}", fg=typer.colors.CYAN, bold=True)
+    if plan.aspired is not None:
+        typer.secho(
+            f"  (rebajado desde {plan.aspired.value} por seguridad)",
+            fg=typer.colors.YELLOW,
+        )
     typer.echo(f"  {plan.rationale}")
     typer.echo(f"  Duración ≈ {plan.template.total_minutes():.0f} min  (FTP {plan.ftp:.0f} W)")
     typer.echo("  Bloques:")

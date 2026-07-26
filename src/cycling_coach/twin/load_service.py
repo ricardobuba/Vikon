@@ -8,9 +8,10 @@ CON pulso pero SIN potencia aportan carga vía TRIMP (no quedan invisibles).
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -32,6 +33,7 @@ from cycling_coach.physiology import (
     training_stress_score,
 )
 from cycling_coach.physiology.training_load import LoadPoint
+from cycling_coach.planner.planner import RecentDay, TrainingContext
 from cycling_coach.twin.cp_estimation import resolve_config
 
 
@@ -89,6 +91,72 @@ def daily_tss_series(
         return None
     daily.setdefault(as_of, 0.0)
     return daily
+
+
+def daily_load_and_intensity(
+    session: Session, athlete_id: int, as_of: date
+) -> dict[date, tuple[float, float]] | None:
+    """dict[día] = (TSS total, intensidad máx del día).
+
+    intensidad = IF real (NP/FTP) para sesiones con potencia; para las de solo
+    pulso se deriva del TSS-equiv: TSS/h = 100·IF² ⇒ IF = √((TSS/h)/100).
+    Base para la regla duro/fácil (grieta 1)."""
+    ftp_traj = ftp_trajectory(session, athlete_id)
+    fallback = latest_parameter_estimate(session, athlete_id, "ftp")
+    if fallback is None and ftp_traj:
+        fallback = ftp_traj[-1][1]
+
+    tss_by_day: dict[date, float] = defaultdict(float)
+    inten_by_day: dict[date, float] = defaultdict(float)
+    if fallback:
+        for day, dur, np_w in load_activity_loads(session, athlete_id):
+            ftp = _ftp_asof(ftp_traj, day, fallback)
+            tss_by_day[day] += training_stress_score(np_w, dur, ftp)
+            if ftp > 0:
+                inten_by_day[day] = max(inten_by_day[day], np_w / ftp)
+
+    hr_bounds = estimate_hr_bounds(session, athlete_id)
+    if hr_bounds:
+        hr_rest, hr_max = hr_bounds
+        athlete = session.get(Athlete, athlete_id)
+        male = (athlete.sex or "M") != "F"
+        for day, dur, avg_hr in load_hr_only_loads(session, athlete_id):
+            tss = hr_trimp_tss(avg_hr, dur, hr_rest, hr_max, male)
+            tss_by_day[day] += tss
+            hours = dur / 3600.0
+            if hours > 0 and tss > 0:
+                inten_by_day[day] = max(inten_by_day[day], math.sqrt(tss / hours / 100.0))
+
+    if not tss_by_day:
+        return None
+    tss_by_day.setdefault(as_of, 0.0)
+    return {d: (tss_by_day[d], inten_by_day.get(d, 0.0)) for d in tss_by_day}
+
+
+def build_training_context(
+    session: Session, athlete_id: int, as_of: date, lookback_days: int = 10
+) -> tuple[LoadPoint | None, TrainingContext | None]:
+    """Estado de forma de hoy + contexto temporal (historia + ramp rate) para las
+    restricciones de seguridad del planner. En una sola pasada de carga."""
+    dli = daily_load_and_intensity(session, athlete_id, as_of)
+    if dli is None:
+        return None, None
+
+    series = compute_ctl_atl_tsb({d: v[0] for d, v in dli.items()})
+    by_day = {p.day: p for p in series}
+    current = by_day.get(as_of, series[-1])
+
+    week_ago = by_day.get(as_of - timedelta(days=7))
+    ramp = (current.ctl - week_ago.ctl) if week_ago else None
+    acwr = (current.atl / current.ctl) if current.ctl > 0 else None
+
+    recent: list[RecentDay] = []
+    for i in range(lookback_days, 0, -1):          # de más viejo a ayer
+        d = as_of - timedelta(days=i)
+        tss, inten = dli.get(d, (0.0, 0.0))
+        recent.append(RecentDay(day=d, tss=tss, intensity=inten))
+
+    return current, TrainingContext(ramp_rate=ramp, acwr=acwr, recent=recent)
 
 
 def compute_and_store_load(

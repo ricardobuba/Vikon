@@ -2,9 +2,20 @@
 
 from cycling_coach.planner.planner import (
     PlannedSession,
+    RecentDay,
+    TrainingContext,
+    apply_constraints,
     choose_objective,
     plan_session,
     render_targets,
 )
 
-__all__ = ["PlannedSession", "choose_objective", "plan_session", "render_targets"]
+__all__ = [
+    "PlannedSession",
+    "RecentDay",
+    "TrainingContext",
+    "apply_constraints",
+    "choose_objective",
+    "plan_session",
+    "render_targets",
+]
