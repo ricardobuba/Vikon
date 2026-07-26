@@ -58,13 +58,24 @@ class LLMClient:
     ) -> str:
         """Una vuelta system+user → texto de la respuesta. `json_mode` pide al
         proveedor que devuelva JSON (lo soportan Groq/OpenAI/Gemini)."""
+        return self.chat(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            temperature=temperature,
+            json_mode=json_mode,
+        )
+
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float | None = None,
+        json_mode: bool = False,
+    ) -> str:
+        """Conversación multi-mensaje (roles system/user/assistant) → texto."""
         payload: dict = {
             "model": self.model,
             "temperature": self.temperature if temperature is None else temperature,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            "messages": messages,
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}

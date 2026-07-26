@@ -25,9 +25,9 @@ from cycling_coach.adapters.strava.oauth import (
     exchange_code,
 )
 from cycling_coach.adapters.strava.source import StravaSource
+from cycling_coach.assistant.assistant import ChatSession, explain_today
 from cycling_coach.assistant.assistant import ask as assistant_ask
-from cycling_coach.assistant.assistant import explain_today
-from cycling_coach.assistant.llm import LLMError
+from cycling_coach.assistant.llm import LLMClient, LLMError
 from cycling_coach.config import get_settings
 from cycling_coach.db.engine import get_engine, session_scope
 from cycling_coach.db.models import Activity, Athlete, Base, DailyMetric, Stream
@@ -716,6 +716,54 @@ def ask_cmd(
     typer.echo(f"  {reply.text}")
     if plan_line:
         typer.secho(f"  → plan: {plan_line}", fg=typer.colors.BRIGHT_BLACK)
+
+
+# --------------------------------------------------------------------------- #
+@app.command("chat")
+def chat_cmd(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+) -> None:
+    """Conversa con Vikon (multivuelta). 'salir' para terminar.
+
+    Recuerda el contexto: di "solo tengo 40 min" y luego "¿por qué?" y sigue
+    hablando del mismo plan. El motor decide; Vikon explica.
+    """
+    from datetime import datetime
+
+    try:
+        llm = LLMClient.from_settings()
+    except LLMError as exc:
+        typer.secho(str(exc), fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1) from exc
+
+    today = datetime.now(UTC).date()
+    typer.secho("Vikon — chat. Escribe 'salir' para terminar.\n", fg=typer.colors.CYAN, bold=True)
+    with session_scope() as session:
+        athlete_id = _resolve_athlete_id(session, athlete_id)
+        chat = ChatSession(session, athlete_id, today, llm)
+        while True:
+            try:
+                msg = typer.prompt("Tú")
+            except (EOFError, KeyboardInterrupt):
+                break
+            if msg.strip().lower() in ("salir", "exit", "quit"):
+                break
+            if not msg.strip():
+                continue
+            try:
+                reply = chat.turn(msg)
+            except LLMError as exc:
+                typer.secho(f"  (error del LLM: {exc})", fg=typer.colors.YELLOW)
+                continue
+            hint = []
+            if reply.intent.minutes is not None:
+                hint.append(f"{reply.intent.minutes:.0f} min")
+            if reply.intent.readiness:
+                hint.append(reply.intent.readiness)
+            tag = f"  ({', '.join(hint)})" if hint else ""
+            typer.secho(f"Vikon:{tag}", fg=typer.colors.CYAN, bold=True)
+            typer.echo(f"  {reply.text}\n")
+    typer.secho("¡Hasta luego!", fg=typer.colors.CYAN)
 
 
 # --------------------------------------------------------------------------- #

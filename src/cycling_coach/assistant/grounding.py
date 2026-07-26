@@ -30,6 +30,7 @@ class Facts:
     cri: float | None = None
     cri_coverage: float | None = None
     cri_components: dict[str, float] = field(default_factory=dict)
+    subjective_cri: float | None = None      # disposición que dijiste (usada en el plan)
     goal_date: date | None = None
     goal_name: str | None = None
     days_to_event: int | None = None
@@ -53,7 +54,12 @@ class Facts:
             L.append(f"Fatiga (ATL): {self.atl:.0f}")
         if self.cri is not None:
             cov = f" (cobertura {self.cri_coverage:.0%})" if self.cri_coverage else ""
-            L.append(f"Disposición (CRI): {self.cri:.0f}/100{cov}")
+            L.append(f"Disposición calculada (CRI): {self.cri:.0f}/100{cov}")
+        if self.subjective_cri is not None:
+            L.append(
+                f"Disposición que dijiste hoy y que USÓ el plan: "
+                f"{self.subjective_cri:.0f}/100"
+            )
         if self.cri_components:
             comps = ", ".join(f"{k}={v:.2f}" for k, v in self.cri_components.items())
             L.append(f"Componentes CRI disponibles: {comps}")
@@ -101,6 +107,7 @@ def gather_facts(
         facts.cri = cri_detail.result.cri
         facts.cri_coverage = cri_detail.result.coverage
         facts.cri_components = dict(cri_detail.result.components)
+    facts.subjective_cri = cri_override      # None salvo que dijeras cómo te sientes
 
     goal = next_goal(session, athlete_id, as_of)
     if goal is not None:

@@ -98,3 +98,46 @@ def test_facts_prompt_shows_goal_and_phase():
 def test_intent_cri_override_normal_is_none():
     assert Intent(readiness="normal").cri_override is None
     assert Intent(readiness=None).cri_override is None
+
+
+def test_facts_shows_subjective_cri_override():
+    f = Facts(as_of=date(2026, 7, 26), cri=62.0, subjective_cri=80.0)
+    block = f.to_prompt()
+    assert "calculada (CRI): 62/100" in block
+    assert "dijiste hoy y que USÓ el plan: 80/100" in block
+
+
+# --- Chat multivuelta con intención pegajosa (sin DB: LLM y facts simulados) --
+def test_chat_sticky_intent(monkeypatch):
+    from cycling_coach.assistant import assistant as A
+
+    # Guiones de intención por turno (el stub devuelve el siguiente cada vez).
+    intents = [
+        {"kind": "plan", "minutes": 40, "readiness": None},
+        {"kind": "question", "minutes": None, "readiness": None, "question": "¿por qué?"},
+        {"kind": "plan", "minutes": None, "readiness": "high"},
+    ]
+    calls = {"minutes": [], "cri": []}
+
+    class _LLM:
+        def extract_json(self, system, user):
+            return intents.pop(0)
+
+        def chat(self, messages, **kw):
+            return "ok"
+
+    def _fake_gather(session, athlete_id, as_of, *, minutes=None, cri_override=None):
+        calls["minutes"].append(minutes)
+        calls["cri"].append(cri_override)
+        return Facts(as_of=as_of)
+
+    monkeypatch.setattr(A, "gather_facts", _fake_gather)
+    chat = A.ChatSession(session=None, athlete_id=1, as_of=date(2026, 7, 26), llm=_LLM())
+
+    chat.turn("solo tengo 40 min")
+    chat.turn("¿por qué?")            # sin minutos nuevos → 40 pegajoso
+    chat.turn("y si me siento fuerte")  # readiness high, 40 sigue
+
+    assert calls["minutes"] == [40.0, 40.0, 40.0]        # minutos persisten
+    assert calls["cri"] == [None, None, 80.0]            # readiness solo al final
+    assert len(chat.history) == 6                        # 3 turnos (user+assistant)

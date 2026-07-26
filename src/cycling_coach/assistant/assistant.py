@@ -6,7 +6,7 @@ respuesta). La decisión —qué entrenar— siempre la toma el motor con la fic
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from sqlalchemy.orm import Session
@@ -84,3 +84,51 @@ def explain_today(
         raise LLMError("No hay plan (falta FTP: corre `cc estimate-cp`).")
     text = llm.complete(EXPLAIN_SYSTEM, explain_user(facts.to_prompt(), None))
     return Reply(text=text.strip(), intent=Intent(kind="plan"), facts=facts)
+
+
+@dataclass
+class ChatSession:
+    """Conversación multivuelta con Vikon. Mantiene el historial y una intención
+    PEGAJOSA: los minutos y la disposición persisten hasta que los cambies (así
+    "40 min" seguido de "¿por qué?" sigue hablando del plan de 40 min). La ficha
+    se recalcula cada vuelta con el estado vigente — el motor siempre decide."""
+
+    session: Session
+    athlete_id: int
+    as_of: date
+    llm: LLMClient
+    minutes: float | None = None
+    readiness: str | None = None
+    history: list[dict[str, str]] = field(default_factory=list)
+
+    def turn(self, message: str) -> Reply:
+        intent = parse_intent(self.llm, message)
+        if intent.minutes is not None:
+            self.minutes = intent.minutes
+        if intent.readiness is not None:
+            self.readiness = intent.readiness
+        cri_override = _READINESS_CRI.get(self.readiness or "")
+
+        facts = gather_facts(
+            self.session, self.athlete_id, self.as_of,
+            minutes=self.minutes, cri_override=cri_override,
+        )
+        system = f"{EXPLAIN_SYSTEM}\n\nFICHA ACTUAL (única fuente de cifras):\n{facts.to_prompt()}"
+        messages = [
+            {"role": "system", "content": system},
+            *self.history,
+            {"role": "user", "content": message},
+        ]
+        text = self.llm.chat(messages).strip()
+
+        self.history.append({"role": "user", "content": message})
+        self.history.append({"role": "assistant", "content": text})
+        self.history = self.history[-12:]        # acota el contexto (6 turnos)
+        return Reply(
+            text=text,
+            intent=Intent(
+                kind=intent.kind, minutes=self.minutes,
+                readiness=self.readiness, question=intent.question,
+            ),
+            facts=facts,
+        )
