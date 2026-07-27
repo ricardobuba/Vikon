@@ -213,3 +213,42 @@ code { background: var(--card-2); border-radius: 5px; padding: 1px 6px; font-siz
 .btn-full { width: 100%; margin-top: 4px; }
 .btn-full:disabled { opacity: .6; cursor: default; }
 #goal-msg, #sync-msg { margin-top: 8px; }
+
+/* --- Onboarding / perfil (overlay) --- */
+.overlay {
+  position: fixed; inset: 0; z-index: 50; overflow-y: auto;
+  background: radial-gradient(120% 60% at 50% -10%, #16202f 0%, var(--charcoal) 55%);
+  display: flex; justify-content: center; align-items: flex-start;
+}
+.ob-card { width: 100%; max-width: 460px; padding: 24px 20px 40px; }
+.ob-card h2 { font-family: 'Sora'; font-size: 24px; margin-bottom: 4px; }
+.ob-card h2 span { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.ob-card .lead { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+.ob-sec { font-family: 'Sora'; font-weight: 600; font-size: 14px; margin: 20px 2px 10px; }
+.ob-sec .opt { color: var(--muted); font-weight: 400; font-size: 12px; }
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+.field input, .field select {
+  width: 100%; background: var(--card); border: 1px solid #2a2f3a; color: var(--text);
+  border-radius: 10px; padding: 11px 13px; font-size: 14px; font-family: inherit;
+}
+.field input:focus, .field select:focus { outline: none; border-color: var(--electric); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.avail { display: flex; flex-direction: column; gap: 6px; }
+.avail .row { display: flex; align-items: center; gap: 10px; }
+.avail .row .day { width: 42px; color: var(--muted); font-size: 13px; }
+.avail .row input { flex: 1; }
+.avail .row .u { color: var(--muted); font-size: 12px; width: 26px; }
+.avail-total { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.avail-total b { color: var(--cyan); font-family: 'Sora'; }
+
+.ob-actions { margin-top: 24px; }
+.ob-actions button {
+  width: 100%; border: none; background: var(--grad); color: #04121f; font-weight: 700;
+  border-radius: 12px; padding: 14px; font-size: 15px; cursor: pointer; font-family: inherit;
+}
+.ob-actions button:disabled { opacity: .6; }
+.ob-skip { text-align: center; margin-top: 12px; }
+.ob-skip a { color: var(--muted); font-size: 13px; cursor: pointer; text-decoration: underline; }
+#ob-msg { margin-top: 10px; font-size: 13px; color: var(--coral); text-align: center; }

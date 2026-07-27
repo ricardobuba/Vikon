@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 
 from cycling_coach.db.models import (
     Activity,
+    Athlete,
+    Availability,
     DailyMetric,
     Goal,
     ModelConfig,
@@ -396,6 +398,53 @@ def training_seconds_on(session: Session, athlete_id: int, day: date) -> int:
         )
     ).scalar_one()
     return int(total or 0)
+
+
+# --- Perfil y disponibilidad (onboarding) ------------------------------------
+_PROFILE_FIELDS = (
+    "name", "sex", "birthdate", "height_cm", "weight_kg", "level",
+    "declared_ftp_w", "hr_max", "hr_rest", "weekly_minutes_target",
+)
+
+
+def get_athlete(session: Session, athlete_id: int) -> Athlete | None:
+    return session.get(Athlete, athlete_id)
+
+
+def save_profile(session: Session, athlete_id: int, data: dict) -> Athlete:
+    """Actualiza los campos de perfil presentes en `data` y marca onboarded."""
+    athlete = session.get(Athlete, athlete_id)
+    if athlete is None:
+        raise ValueError(f"atleta {athlete_id} no existe")
+    for field in _PROFILE_FIELDS:
+        if field in data:
+            setattr(athlete, field, data[field])
+    athlete.onboarded = True
+    session.flush()
+    return athlete
+
+
+def get_availability(session: Session, athlete_id: int) -> dict[int, int]:
+    """{weekday(0=lunes)→minutos}. Vacío si no se ha configurado."""
+    rows = session.execute(
+        select(Availability.weekday, Availability.minutes).where(
+            Availability.athlete_id == athlete_id
+        )
+    ).all()
+    return {wd: mins for wd, mins in rows}
+
+
+def set_availability(session: Session, athlete_id: int, per_day: dict[int, int]) -> None:
+    """Reemplaza la disponibilidad semanal (upsert por día)."""
+    for weekday, minutes in per_day.items():
+        stmt = insert(Availability).values(
+            athlete_id=athlete_id, weekday=int(weekday), minutes=int(minutes)
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["athlete_id", "weekday"],
+            set_={"minutes": int(minutes)},
+        )
+        session.execute(stmt)
 
 
 def activity_exists(session: Session, provider: str, provider_activity_id: str) -> bool:

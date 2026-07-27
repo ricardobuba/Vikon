@@ -23,9 +23,16 @@ from cycling_coach.assistant.assistant import ChatSession
 from cycling_coach.assistant.grounding import Facts, gather_facts, planning_date
 from cycling_coach.assistant.llm import LLMClient, LLMError
 from cycling_coach.config import get_settings
-from cycling_coach.db.engine import session_scope
+from cycling_coach.db.engine import ensure_schema, session_scope
 from cycling_coach.db.models import Activity, Athlete
-from cycling_coach.db.repositories import add_goal, next_goal
+from cycling_coach.db.repositories import (
+    add_goal,
+    get_athlete,
+    get_availability,
+    next_goal,
+    save_profile,
+    set_availability,
+)
 from cycling_coach.physiology import compute_ctl_atl_tsb
 from cycling_coach.planner.planner import PlannedSession
 from cycling_coach.planner.service import plan_horizon
@@ -57,6 +64,7 @@ async def _sync_loop(interval_s: int) -> None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    ensure_schema()                    # crea/actualiza el esquema (idempotente)
     interval = get_settings().sync_interval_s
     task = asyncio.create_task(_sync_loop(interval)) if interval > 0 else None
     try:
@@ -124,6 +132,22 @@ class GoalIn(BaseModel):
     date: str                       # ISO YYYY-MM-DD
     kind: str | None = None
     priority: str = "A"
+
+
+class ProfileIn(BaseModel):
+    name: str | None = None
+    level: str | None = None            # principiante|intermedio|avanzado|elite
+    declared_ftp_w: float | None = None
+    sex: str | None = None              # M|F
+    birthdate: str | None = None        # ISO YYYY-MM-DD
+    height_cm: float | None = None
+    weight_kg: float | None = None
+    hr_max: int | None = None
+    hr_rest: int | None = None
+    weekly_minutes_target: int | None = None
+    availability: dict[int, int] | None = None   # weekday 0=lunes → minutos
+    goal_name: str | None = None
+    goal_date: str | None = None                 # objetivo opcional del onboarding
 
 
 def create_app() -> FastAPI:
@@ -249,6 +273,52 @@ def create_app() -> FastAPI:
                 "base_url": cfg.llm_base_url,
             },
         }
+
+    @app.get("/api/profile")
+    def get_profile_ep(session: DB) -> dict[str, Any]:
+        aid = _athlete_id(session)
+        a = get_athlete(session, aid)
+        goal = next_goal(session, aid, date.today())
+        return {
+            "onboarded": bool(a.onboarded) if a else False,
+            "name": a.name if a else None,
+            "level": a.level if a else None,
+            "declared_ftp_w": a.declared_ftp_w if a else None,
+            "sex": a.sex if a else None,
+            "birthdate": a.birthdate.isoformat() if a and a.birthdate else None,
+            "height_cm": a.height_cm if a else None,
+            "weight_kg": a.weight_kg if a else None,
+            "hr_max": a.hr_max if a else None,
+            "hr_rest": a.hr_rest if a else None,
+            "weekly_minutes_target": a.weekly_minutes_target if a else None,
+            "availability": get_availability(session, aid),
+            "goal": (
+                {"name": goal.name, "date": goal.event_date.isoformat()} if goal else None
+            ),
+        }
+
+    @app.post("/api/profile")
+    def save_profile_ep(body: ProfileIn, session: DB) -> dict[str, Any]:
+        aid = _athlete_id(session)
+        data: dict[str, Any] = {
+            k: v for k, v in body.model_dump().items()
+            if k not in ("availability", "birthdate", "goal_name", "goal_date")
+            and v is not None
+        }
+        if body.birthdate:
+            try:
+                data["birthdate"] = date.fromisoformat(body.birthdate)
+            except ValueError as exc:
+                raise HTTPException(422, "Fecha de nacimiento inválida.") from exc
+        save_profile(session, aid, data)
+        if body.availability:
+            set_availability(session, aid, body.availability)
+        if body.goal_date:
+            try:
+                add_goal(session, aid, date.fromisoformat(body.goal_date), name=body.goal_name)
+            except ValueError as exc:
+                raise HTTPException(422, "Fecha de objetivo inválida.") from exc
+        return {"ok": True}
 
     @app.post("/api/goal")
     def set_goal_ep(body: GoalIn, session: DB) -> dict[str, Any]:

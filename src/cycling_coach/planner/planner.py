@@ -474,6 +474,17 @@ def plan_session(
     )
 
 
+def rest_session(ftp: float, reason: str) -> PlannedSession:
+    """Sesión de descanso explícita (p. ej. un día sin disponibilidad)."""
+    return PlannedSession(
+        objective=Objective.rest,
+        template=LIBRARY[Objective.rest].variants[0],
+        ftp=ftp,
+        rationale=reason,
+        targets=[],
+    )
+
+
 def _endurance_variant(
     kind: str, ctl: float, atl: float, floor: float, minutes: float | None
 ) -> WorkoutTemplate:
@@ -516,11 +527,16 @@ def roll_horizon(
     start: date | None = None,
     days_to_event: int | None = None,
     minutes: float | None = None,
+    daily_minutes: dict[int, int] | None = None,
 ) -> list[HorizonDay]:
     """Proyecta `days` días encadenando `plan_session` y ARRASTRANDO el estado
     simulado (CTL/ATL) y la historia (duro/fácil emergente). Voraz por diseño:
     cada día usa la misma lógica explicable; no optimiza la secuencia global
     (nuestro modelo dosis→respuesta es demasiado débil para justificarlo).
+
+    `daily_minutes` (weekday 0=lunes → minutos) encaja cada día en TU
+    disponibilidad; un día con 0 minutos se planifica como descanso. Si no se da,
+    se usa `minutes` para todos.
 
     Solo el día 0 se compromete; el resto es una proyección que se re-planifica
     al llegar datos reales (de ahí "deslizante"). La CRI es una señal de HOY: no
@@ -542,6 +558,17 @@ def roll_horizon(
         dte = (days_to_event - i) if days_to_event is not None else None
         phase = phase_for(dte)
 
+        # Minutos disponibles ese día (por día de la semana) → 0 = descanso.
+        md = daily_minutes.get(day.weekday(), minutes) if daily_minutes else minutes
+        if md is not None and md <= 0:
+            plan = rest_session(ftp, "descanso: sin disponibilidad ese día")
+            out.append(HorizonDay(day, tsb, ctl, atl, phase, plan, 0.0))
+            sim = simulate_next_day(ctl, atl, 0.0)
+            ctl, atl = sim.ctl_after, sim.atl_after
+            window.append(ctl)
+            recent.append(RecentDay(day, 0.0, 0.0))
+            continue
+
         ramp = ctl - window[-8] if len(window) >= 8 else context.ramp_rate
         acwr = (atl / ctl) if ctl > 0 else None
         day_ctx = replace(
@@ -551,7 +578,7 @@ def roll_horizon(
         plan = plan_session(
             ftp=ftp, tsb=tsb, ctl=ctl, atl=atl,
             cri=(cri if i == 0 else None),          # CRI solo es fiable hoy
-            context=day_ctx, minutes=minutes,
+            context=day_ctx, minutes=md,
             phase=phase, days_to_event=dte,
         )
 
@@ -565,7 +592,7 @@ def roll_horizon(
             else:
                 kind = "short" if endur_n % 2 == 0 else "mid"
             endur_n += 1
-            tmpl = _endurance_variant(kind, ctl, atl, floor, minutes)
+            tmpl = _endurance_variant(kind, ctl, atl, floor, md)
             if tmpl is not plan.template:
                 plan = replace(
                     plan, template=tmpl, targets=render_targets(tmpl, ftp),

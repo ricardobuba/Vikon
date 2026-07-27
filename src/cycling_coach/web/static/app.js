@@ -227,6 +227,11 @@ async function renderSettings() {
   const llmHost = (() => { try { return new URL(s.llm.base_url).host; } catch { return s.llm.base_url; } })();
 
   box.innerHTML = `
+    <div class="card"><h3>Perfil y disponibilidad</h3>
+      <div class="sub">Tus datos y cuánto tiempo tienes cada día. El plan encaja las sesiones en tu disponibilidad.</div>
+      <button id="edit-profile" class="btn-full" style="margin-top:10px">Editar perfil y disponibilidad</button>
+    </div>
+
     <div class="card"><h3>Tu motor</h3>
       <div class="setrow"><span>FTP</span><span class="v">${fmt(s.ftp)} W</span></div>
       <div class="setrow"><span>CP (potencia crítica)</span><span class="v">${fmt(s.cp)} W</span></div>
@@ -264,6 +269,8 @@ async function renderSettings() {
       <div class="sub">Vikon · entrenador de ciclismo con gemelo digital. El motor decide; la IA explica.</div>
     </div>`;
 
+  $("#edit-profile").addEventListener("click", () => showProfile({ onboarding: false }));
+
   $("#goal-save").addEventListener("click", async () => {
     const date = $("#goal-date").value;
     if (!date) { $("#goal-msg").textContent = "Elige una fecha."; return; }
@@ -290,6 +297,106 @@ async function renderSettings() {
     } catch (e) { $("#sync-msg").textContent = e.detail || "No se pudo sincronizar (¿credenciales de Strava?)."; }
     finally { btn.disabled = false; }
   });
+}
+
+// --- Perfil / onboarding ----------------------------------------------------
+const DAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+function profileFormHtml(p, onboarding) {
+  const v = (x) => (x == null ? "" : x);
+  const av = p.availability || {};
+  const days = DAYS.map((d, i) =>
+    `<div class="row"><span class="day">${d}</span>
+      <input type="number" min="0" max="600" step="5" id="av-${i}" value="${av[i] != null ? av[i] : ""}" placeholder="0" />
+      <span class="u">min</span></div>`).join("");
+  const opt = (val, label) => `<option value="${val}"${p.level === val ? " selected" : ""}>${label}</option>`;
+  return `
+    <h2>${onboarding ? "Bienvenido a <span>Vikon</span>" : "Perfil y disponibilidad"}</h2>
+    <div class="lead">${onboarding
+      ? "Cuéntame lo básico para ajustar tu entrenamiento. Los datos físicos son opcionales."
+      : "Edita tus datos y tu disponibilidad semanal."}</div>
+
+    <div class="ob-sec">Sobre ti</div>
+    <div class="field"><label>Nombre</label><input id="pf-name" value="${v(p.name)}" placeholder="Tu nombre" /></div>
+    <div class="field"><label>Nivel deportivo</label>
+      <select id="pf-level"><option value="">—</option>
+        ${opt("principiante", "Principiante")}${opt("intermedio", "Intermedio")}
+        ${opt("avanzado", "Avanzado")}${opt("elite", "Élite")}
+      </select></div>
+    <div class="field"><label>FTP declarado (W)</label>
+      <input type="number" id="pf-ftp" value="${v(p.declared_ftp_w)}" placeholder="${p._est_ftp || "vatios"}" /></div>
+
+    <div class="ob-sec">Objetivo <span class="opt">· opcional</span></div>
+    <div class="grid2">
+      <div class="field"><label>Evento</label><input id="pf-goal-name" value="${v(p.goal && p.goal.name)}" placeholder="Gran Fondo…" /></div>
+      <div class="field"><label>Fecha</label><input type="date" id="pf-goal-date" value="${v(p.goal && p.goal.date)}" /></div>
+    </div>
+
+    <div class="ob-sec">Datos físicos <span class="opt">· opcional</span></div>
+    <div class="grid2">
+      <div class="field"><label>Sexo</label><select id="pf-sex">
+        <option value=""${!p.sex ? " selected" : ""}>—</option>
+        <option value="M"${p.sex === "M" ? " selected" : ""}>Hombre</option>
+        <option value="F"${p.sex === "F" ? " selected" : ""}>Mujer</option></select></div>
+      <div class="field"><label>Nacimiento</label><input type="date" id="pf-birth" value="${v(p.birthdate)}" /></div>
+      <div class="field"><label>Altura (cm)</label><input type="number" id="pf-height" value="${v(p.height_cm)}" /></div>
+      <div class="field"><label>Peso (kg)</label><input type="number" step="0.1" id="pf-weight" value="${v(p.weight_kg)}" /></div>
+      <div class="field"><label>FC máx</label><input type="number" id="pf-hrmax" value="${v(p.hr_max)}" /></div>
+      <div class="field"><label>FC reposo</label><input type="number" id="pf-hrrest" value="${v(p.hr_rest)}" /></div>
+    </div>
+
+    <div class="ob-sec">Disponibilidad semanal</div>
+    <div class="lead" style="margin:-4px 2px 10px">Minutos que puedes entrenar cada día. Un día en 0 = descanso.</div>
+    <div class="avail">${days}</div>
+    <div class="avail-total">Total semanal: <b id="av-sum">0</b> min
+      · objetivo <input type="number" id="wk-target" value="${v(p.weekly_minutes_target)}" placeholder="—"
+        style="width:70px;display:inline-block;padding:6px 8px" /> min</div>
+
+    <div class="ob-actions"><button id="pf-save">${onboarding ? "Empezar" : "Guardar"}</button></div>
+    ${onboarding ? `<div class="ob-skip"><a id="pf-skip">Saltar por ahora</a></div>` : ""}
+    <div id="ob-msg"></div>`;
+}
+
+async function showProfile({ onboarding }) {
+  let p = {};
+  try { p = await api("/api/profile"); } catch (_) { /* sin perfil todavía */ }
+  if (onboarding && !p.declared_ftp_w) {
+    try { const st = await api("/api/settings"); if (st.ftp) p._est_ftp = Math.round(st.ftp); } catch (_) {}
+  }
+  $("#ob-card").innerHTML = profileFormHtml(p, onboarding);
+  $("#onboarding").style.display = "flex";
+  window.scrollTo(0, 0);
+  const recompute = () => {
+    let sum = 0;
+    for (let i = 0; i < 7; i++) sum += Number($(`#av-${i}`).value || 0);
+    $("#av-sum").textContent = sum;
+  };
+  for (let i = 0; i < 7; i++) $(`#av-${i}`).addEventListener("input", recompute);
+  recompute();
+  $("#pf-save").addEventListener("click", () => submitProfile(onboarding));
+  if (onboarding) $("#pf-skip").addEventListener("click", () => { $("#onboarding").style.display = "none"; syncThenLoad(); });
+}
+
+async function submitProfile(onboarding) {
+  const num = (id) => { const x = $(id).value.trim(); return x === "" ? null : Number(x); };
+  const str = (id) => { const x = $(id).value.trim(); return x === "" ? null : x; };
+  const availability = {};
+  for (let i = 0; i < 7; i++) { const x = $(`#av-${i}`).value.trim(); availability[i] = x === "" ? 0 : Number(x); }
+  const payload = {
+    name: str("#pf-name"), level: str("#pf-level"), declared_ftp_w: num("#pf-ftp"),
+    sex: str("#pf-sex"), birthdate: str("#pf-birth"), height_cm: num("#pf-height"),
+    weight_kg: num("#pf-weight"), hr_max: num("#pf-hrmax"), hr_rest: num("#pf-hrrest"),
+    weekly_minutes_target: num("#wk-target"), availability,
+    goal_name: str("#pf-goal-name"), goal_date: str("#pf-goal-date"),
+  };
+  const btn = $("#pf-save"); btn.disabled = true;
+  try {
+    await api("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    $("#onboarding").style.display = "none";
+    horizonLoaded = false;
+    if (onboarding) { syncThenLoad(); }
+    else { loadHome(); renderSettings(); }
+  } catch (e) { $("#ob-msg").textContent = e.detail || "No se pudo guardar."; btn.disabled = false; }
 }
 
 // --- Chat -------------------------------------------------------------------
@@ -367,4 +474,12 @@ document.querySelectorAll("#quick button").forEach((b) => b.addEventListener("cl
     $("#chat-text").value = b.dataset.q; sendChat();
   }
 }));
-syncThenLoad();
+
+// Arranque: si no has completado el onboarding, te recibe la pantalla de perfil.
+async function boot() {
+  let prof = null;
+  try { prof = await api("/api/profile"); } catch (_) { /* sin atleta: sigue igual */ }
+  if (prof && !prof.onboarded) showProfile({ onboarding: true });
+  else syncThenLoad();
+}
+boot();

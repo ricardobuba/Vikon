@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from cycling_coach.db.repositories import (
+    get_availability,
     latest_parameter_estimate,
     next_goal,
     training_seconds_on,
@@ -20,6 +21,7 @@ from cycling_coach.planner.planner import (
     PlannedSession,
     phase_for,
     plan_session,
+    rest_session,
     roll_horizon,
 )
 from cycling_coach.twin.cri_service import compute_cri_service
@@ -162,11 +164,21 @@ def gather_facts(
 
     if facts.ftp and current is not None:
         cri = cri_override if cri_override is not None else facts.cri
-        facts.plan = plan_session(
-            ftp=facts.ftp, tsb=current.tsb, ctl=current.ctl, atl=current.atl,
-            cri=cri, context=ctx, minutes=minutes,
-            phase=phase_for(facts.days_to_event), days_to_event=facts.days_to_event,
-        )
+        # Disponibilidad: minutos del día a planificar (0 = descanso).
+        avail = get_availability(session, athlete_id)
+        day_min = minutes
+        if avail and plan_date.weekday() in avail:
+            day_min = avail[plan_date.weekday()]
+        if day_min is not None and day_min <= 0:
+            facts.plan = rest_session(
+                facts.ftp, "descanso: tu disponibilidad de ese día es 0 min"
+            )
+        else:
+            facts.plan = plan_session(
+                ftp=facts.ftp, tsb=current.tsb, ctl=current.ctl, atl=current.atl,
+                cri=cri, context=ctx, minutes=day_min,
+                phase=phase_for(facts.days_to_event), days_to_event=facts.days_to_event,
+            )
         # Horizonte de la semana para que el chat conozca el plan futuro.
         facts.horizon = [] if not with_horizon else [
             {
@@ -180,6 +192,7 @@ def gather_facts(
                 ftp=facts.ftp, ctl=current.ctl, atl=current.atl, context=ctx,
                 cri=cri, days=7, start=plan_date,
                 days_to_event=facts.days_to_event, minutes=minutes,
+                daily_minutes=avail or None,
             )
         ]
     return facts

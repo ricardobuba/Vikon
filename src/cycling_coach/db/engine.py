@@ -35,3 +35,32 @@ def session_scope() -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+# Columnas añadidas a tablas ya existentes (create_all NO altera tablas). Todas
+# idempotentes (ADD COLUMN IF NOT EXISTS). Para producción → migraciones Alembic.
+_ADD_COLUMNS = [
+    "ALTER TABLE activity ADD COLUMN IF NOT EXISTS "
+    "is_maximal_test boolean NOT NULL DEFAULT false",
+    "ALTER TABLE model_config ADD COLUMN IF NOT EXISTS cri_weights jsonb",
+    "ALTER TABLE athlete ADD COLUMN IF NOT EXISTS level text",
+    "ALTER TABLE athlete ADD COLUMN IF NOT EXISTS declared_ftp_w double precision",
+    "ALTER TABLE athlete ADD COLUMN IF NOT EXISTS hr_max integer",
+    "ALTER TABLE athlete ADD COLUMN IF NOT EXISTS hr_rest integer",
+    "ALTER TABLE athlete ADD COLUMN IF NOT EXISTS weekly_minutes_target integer",
+    "ALTER TABLE athlete ADD COLUMN IF NOT EXISTS onboarded boolean NOT NULL DEFAULT false",
+]
+
+
+def ensure_schema(engine: Engine | None = None) -> None:
+    """Crea las tablas que falten y añade columnas nuevas a las existentes.
+    Idempotente: seguro de llamar en cada arranque. No borra ni migra datos."""
+    from sqlalchemy import text
+
+    from cycling_coach.db.models import Base
+
+    engine = engine or get_engine()
+    Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        for stmt in _ADD_COLUMNS:
+            conn.execute(text(stmt))

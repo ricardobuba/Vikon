@@ -7,12 +7,17 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from cycling_coach.db.repositories import latest_parameter_estimate, next_goal
+from cycling_coach.db.repositories import (
+    get_availability,
+    latest_parameter_estimate,
+    next_goal,
+)
 from cycling_coach.planner.planner import (
     HorizonDay,
     PlannedSession,
     phase_for,
     plan_session,
+    rest_session,
     roll_horizon,
 )
 from cycling_coach.twin.cri_service import compute_cri_service
@@ -39,6 +44,14 @@ def plan_today(
     ftp = latest_parameter_estimate(session, athlete_id, "ftp")
     if not ftp:
         return None
+
+    # Disponibilidad de HOY (por día de la semana): 0 = descanso; si no está
+    # configurada, se respeta el `minutes` que llegue (o ninguno).
+    avail = get_availability(session, athlete_id)
+    if avail and as_of.weekday() in avail:
+        minutes = avail[as_of.weekday()]
+    if minutes is not None and minutes <= 0:
+        return rest_session(ftp, "descanso: tu disponibilidad de hoy es 0 min")
 
     current, ctx = build_training_context(session, athlete_id, as_of)
     tsb = current.tsb if current else None
@@ -86,7 +99,9 @@ def plan_horizon(
     goal = next_goal(session, athlete_id, as_of)
     days_to_event = (goal.event_date - as_of).days if goal else None
 
+    avail = get_availability(session, athlete_id)
     return roll_horizon(
         ftp=ftp, ctl=current.ctl, atl=current.atl, context=ctx, cri=cri,
         days=days, start=as_of, days_to_event=days_to_event, minutes=minutes,
+        daily_minutes=avail or None,
     )

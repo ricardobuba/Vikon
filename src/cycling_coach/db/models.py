@@ -47,6 +47,13 @@ class Athlete(Base):
     # nominal; el peso que varía día a día va a daily_metric
     weight_kg: Mapped[float | None] = mapped_column(Double)
     experience: Mapped[str | None] = mapped_column(Text)
+    # --- Perfil (onboarding): nivel deportivo, FTP declarado y fisiológicos ---
+    level: Mapped[str | None] = mapped_column(Text)   # principiante|intermedio|avanzado|elite
+    declared_ftp_w: Mapped[float | None] = mapped_column(Double)   # FTP que declaras (semilla)
+    hr_max: Mapped[int | None] = mapped_column(Integer)
+    hr_rest: Mapped[int | None] = mapped_column(Integer)
+    weekly_minutes_target: Mapped[int | None] = mapped_column(Integer)   # tope semanal
+    onboarded: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -239,6 +246,23 @@ class Goal(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class Availability(Base):
+    """Minutos disponibles por día de la semana (0=lunes … 6=domingo). El planner
+    encaja la dosis en estos minutos; un día con 0 se planifica como descanso."""
+
+    __tablename__ = "availability"
+    __table_args__ = (
+        UniqueConstraint("athlete_id", "weekday", name="uq_athlete_weekday"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    athlete_id: Mapped[int] = mapped_column(
+        ForeignKey("athlete.id", ondelete="CASCADE"), index=True
+    )
+    weekday: Mapped[int] = mapped_column(Integer)     # 0=lunes … 6=domingo
+    minutes: Mapped[int] = mapped_column(Integer)
 
 
 class DailyMetric(Base):
