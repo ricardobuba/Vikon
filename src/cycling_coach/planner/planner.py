@@ -72,6 +72,16 @@ MAX_HARD_PER_WEEK = 3   # tope de días de calidad en 7 días (guía polarizada)
 RAMP_CAP = 8.0          # subida de CTL/semana considerada agresiva
 ACWR_CAP = 1.5          # tope agudo:crónico (atl/ctl)
 
+# --- Calidad garantizada (política del dueño): mantener el FTP/punch ---------
+# Un día "de calidad" es intensidad ≥ este IF (sweet spot 0.90, umbral 0.97,
+# VO2 1.14 lo superan; la Z2 en 0.70 no). Distinto de is_hard (que también
+# cuenta el volumen alto): aquí solo importa la INTENSIDAD.
+QUALITY_INTENSITY = 0.85
+# Cadencia objetivo de intensidad: si pasan ≥ estos días sin calidad y no estás
+# en fatiga extrema, se fuerza un día de calidad (≈1-2/semana, cadencia
+# polarizada estándar). No aplica en semana de carrera. Ajustable.
+QUALITY_SPACING_DAYS = 4
+
 
 @dataclass
 class RecentDay:
@@ -84,6 +94,11 @@ class RecentDay:
     def is_hard(self) -> bool:
         return self.intensity >= HARD_INTENSITY or self.tss >= HARD_TSS
 
+    @property
+    def is_quality(self) -> bool:
+        """Sesión con intensidad real (para la cadencia de calidad garantizada)."""
+        return self.intensity >= QUALITY_INTENSITY
+
 
 @dataclass
 class TrainingContext:
@@ -95,12 +110,23 @@ class TrainingContext:
     tsb_history: list[float] = field(default_factory=list)   # TSB histórico (todo)
     fitness_pct: float | None = None     # percentil del CTL actual (0–1)
     ctl_window: list[float] = field(default_factory=list)    # últimos ~8 CTL (viejo→hoy)
+    days_since_quality: int | None = None  # días desde la última sesión de intensidad
 
     def yesterday_hard(self) -> bool:
         return bool(self.recent) and self.recent[-1].is_hard
 
     def hard_days_last_week(self) -> int:
         return sum(1 for d in self.recent[-7:] if d.is_hard)
+
+
+def days_since_quality(recent: list[RecentDay]) -> int:
+    """Días desde la última sesión de calidad hasta HOY (planificar el día
+    siguiente al último de `recent`). Ayer con calidad → 1. Si no hay calidad en
+    la ventana → ventana+1 (muy atrasado: se forzará calidad)."""
+    for i, d in enumerate(reversed(recent), start=1):
+        if d.is_quality:
+            return i
+    return len(recent) + 1
 
 
 # --- Grieta 3: umbrales de forma personalizados (no mágicos) -----------------
@@ -351,6 +377,27 @@ def plan_session(
         objective, adjust = apply_constraints(aspired, context)
     objective, phase_note = apply_phase(objective, phase)
 
+    # Calidad garantizada: si hace demasiado que no metes intensidad y NO estás
+    # en fatiga extrema ni recuperando de un día duro, sube a calidad sostenible
+    # (sweet spot) para mantener el FTP/punch (rompe el "Z2 para siempre"). No en
+    # semana de carrera. Respeta la regla duro/fácil y el tope semanal.
+    quality_note = None
+    if (
+        context is not None
+        and context.days_since_quality is not None
+        and context.days_since_quality >= QUALITY_SPACING_DAYS
+        and INTENSITY_RANK[objective] < INTENSITY_RANK[Objective.sweet_spot]
+        and (tsb is None or tsb >= (thresholds or FormThresholds()).recovery_below)
+        and not context.yesterday_hard()
+        and context.hard_days_last_week() < MAX_HARD_PER_WEEK
+        and phase is not Phase.race
+    ):
+        objective = Objective.sweet_spot
+        quality_note = (
+            f"calidad garantizada: {context.days_since_quality} días sin intensidad "
+            "→ sweet spot para mantener el FTP"
+        )
+
     # Dosis: si conocemos el estado (CTL/ATL), SIMULAMOS cada variante y elegimos
     # el mayor estímulo que el modelo predice seguro (grieta 6). Si no, heurístico.
     offset = phase_level_offset(phase)
@@ -397,6 +444,8 @@ def plan_session(
     )
     if adjust:
         rationale += f" [{adjust}]"
+    if quality_note:
+        rationale += f" [{quality_note}]"
     if phase_note:
         rationale += f" [{phase_note}]"
     if sim_note:
@@ -406,10 +455,14 @@ def plan_session(
             f" [nota: la sesión más corta de calidad ({template.total_minutes():.0f}') "
             f"excede tus {minutes:.0f}' — considera partirla o bajar el objetivo]"
         )
-    # `aspired` solo marca un rebaje de INTENSIDAD por seguridad; el descanso
-    # emergente es una escalada de recuperación (ya explicada), no un rebaje.
+    # `aspired` solo marca un REBAJE de intensidad por seguridad. Solo lo
+    # señalamos si el objetivo final es MENOS intenso que el aspirado (no cuando
+    # la calidad garantizada lo sube, ni en el descanso emergente).
     downgraded = (
-        aspired if (objective is not aspired and objective is not Objective.rest) else None
+        aspired
+        if INTENSITY_RANK[objective] < INTENSITY_RANK[aspired]
+        and objective is not Objective.rest
+        else None
     )
     return PlannedSession(
         objective=objective,
@@ -419,6 +472,26 @@ def plan_session(
         targets=render_targets(template, ftp),
         aspired=downgraded,
     )
+
+
+def _endurance_variant(
+    kind: str, ctl: float, atl: float, floor: float, minutes: float | None
+) -> WorkoutTemplate:
+    """Elige una variante de resistencia por longitud (variedad aeróbica, grieta
+    del "Z2 para siempre"): 'short' la más corta, 'mid' intermedia, 'long' la más
+    larga que el modelo aún deja sobre tu suelo de forma. Respeta el tiempo."""
+    variants = LIBRARY[Objective.endurance].variants
+    cand = [v for v in variants if minutes is None or v.total_minutes() <= minutes]
+    cand = cand or variants[:1]
+    if kind == "short":
+        return cand[0]
+    if kind == "long":
+        safe = [
+            v for v in cand
+            if simulate_next_day(ctl, atl, estimate_session_tss(v)).tsb_tomorrow >= floor
+        ]
+        return (safe or cand)[-1]
+    return cand[len(cand) // 2]
 
 
 # --- Horizonte deslizante (rollout multi-día simulado) -----------------------
@@ -455,6 +528,12 @@ def roll_horizon(
     start = start or (context.recent[-1].day + timedelta(days=1) if context.recent else date.min)
     recent = list(context.recent)
     window = list(context.ctl_window) or [ctl]
+    floor = (
+        FormThresholds.personalize(context.tsb_history).recovery_below
+        if context.tsb_history else FormThresholds().recovery_below
+    )
+    since_long = 0        # días aeróbicos desde el último "día largo"
+    endur_n = 0           # nº de días aeróbicos (para rotar corto/medio)
 
     out: list[HorizonDay] = []
     for i in range(days):
@@ -466,7 +545,8 @@ def roll_horizon(
         ramp = ctl - window[-8] if len(window) >= 8 else context.ramp_rate
         acwr = (atl / ctl) if ctl > 0 else None
         day_ctx = replace(
-            context, recent=recent[-14:], ramp_rate=ramp, acwr=acwr
+            context, recent=recent[-14:], ramp_rate=ramp, acwr=acwr,
+            days_since_quality=days_since_quality(recent),
         )
         plan = plan_session(
             ftp=ftp, tsb=tsb, ctl=ctl, atl=atl,
@@ -474,6 +554,24 @@ def roll_horizon(
             context=day_ctx, minutes=minutes,
             phase=phase, days_to_event=dte,
         )
+
+        # (3) Variedad aeróbica en los días FUTUROS (el día 0 se compromete tal
+        # cual): un día largo por semana; el resto, corto/medio alternando. Rompe
+        # el "Z2 80' idéntico cada día" y banca forma para los días de calidad.
+        if i >= 1 and plan.objective is Objective.endurance:
+            since_long += 1
+            if since_long >= 6:
+                kind, since_long = "long", 0
+            else:
+                kind = "short" if endur_n % 2 == 0 else "mid"
+            endur_n += 1
+            tmpl = _endurance_variant(kind, ctl, atl, floor, minutes)
+            if tmpl is not plan.template:
+                plan = replace(
+                    plan, template=tmpl, targets=render_targets(tmpl, ftp),
+                    rationale=plan.rationale + f" [variedad aeróbica: {kind}]",
+                )
+
         tss = estimate_session_tss(plan.template)
         out.append(HorizonDay(day, tsb, ctl, atl, phase, plan, tss))
 

@@ -39,6 +39,7 @@ from cycling_coach.planner.planner import (
     RecentDay,
     TrainingContext,
     _weighted_fraction_below,
+    days_since_quality,
 )
 from cycling_coach.twin.cp_estimation import resolve_config
 
@@ -221,6 +222,14 @@ def build_training_context(
     # rate durante el rollout del horizonte.
     ctl_window = [p.ctl for p in past if p.day < as_of][-8:]
 
+    # Días desde la última sesión de INTENSIDAD (ventana amplia, 28 d): alimenta
+    # la "calidad garantizada" del planner (mantener el FTP/punch).
+    dsq_window = [
+        RecentDay(day=(d := as_of - timedelta(days=k)), tss=dli.get(d, (0.0, 0.0))[0],
+                  intensity=dli.get(d, (0.0, 0.0))[1])
+        for k in range(28, 0, -1)
+    ]
+
     return current, TrainingContext(
         ramp_rate=ramp,
         acwr=acwr,
@@ -228,6 +237,7 @@ def build_training_context(
         tsb_history=tsb_history,
         fitness_pct=fitness_pct,
         ctl_window=ctl_window,
+        days_since_quality=days_since_quality(dsq_window),
     )
 
 
