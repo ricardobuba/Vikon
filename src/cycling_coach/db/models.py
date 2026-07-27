@@ -248,6 +248,33 @@ class Goal(Base):
     )
 
 
+class User(Base):
+    """Cuenta de acceso. Uno-a-uno con un atleta (multi-atleta por usuario es
+    futuro). La contraseña se guarda como hash PBKDF2 + sal (nunca en claro)."""
+
+    __tablename__ = "app_user"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(Text, unique=True, index=True)
+    pw_hash: Mapped[str] = mapped_column(Text)
+    pw_salt: Mapped[str] = mapped_column(Text)
+    athlete_id: Mapped[int] = mapped_column(
+        ForeignKey("athlete.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AppMeta(Base):
+    """Clave→valor de la app (p. ej. el secreto para firmar las cookies)."""
+
+    __tablename__ = "app_meta"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+
+
 class Availability(Base):
     """Minutos disponibles por día de la semana (0=lunes … 6=domingo). El planner
     encaja la dosis en estos minutos; un día con 0 se planifica como descanso."""

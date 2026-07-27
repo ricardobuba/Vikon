@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from cycling_coach.db.models import (
     Activity,
+    AppMeta,
     Athlete,
     Availability,
     DailyMetric,
@@ -22,6 +23,7 @@ from cycling_coach.db.models import (
     ParameterEstimate,
     Stream,
     TestResult,
+    User,
 )
 from cycling_coach.domain.models import (
     CanonicalActivity,
@@ -445,6 +447,58 @@ def set_availability(session: Session, athlete_id: int, per_day: dict[int, int])
             set_={"minutes": int(minutes)},
         )
         session.execute(stmt)
+
+
+# --- Cuentas / autenticación -------------------------------------------------
+def count_users(session: Session) -> int:
+    return session.execute(select(func.count()).select_from(User)).scalar_one()
+
+
+def get_user(session: Session, user_id: int) -> User | None:
+    return session.get(User, user_id)
+
+
+def get_user_by_username(session: Session, username: str) -> User | None:
+    return session.execute(
+        select(User).where(User.username == username)
+    ).scalar_one_or_none()
+
+
+def create_user(
+    session: Session, username: str, pw_hash: str, pw_salt: str, athlete_id: int
+) -> User:
+    user = User(
+        username=username, pw_hash=pw_hash, pw_salt=pw_salt, athlete_id=athlete_id
+    )
+    session.add(user)
+    session.flush()
+    return user
+
+
+def first_athlete_id(session: Session) -> int | None:
+    return session.execute(
+        select(Athlete.id).order_by(Athlete.id).limit(1)
+    ).scalar_one_or_none()
+
+
+def create_athlete(session: Session, name: str | None = None) -> int:
+    athlete = Athlete(name=name)
+    session.add(athlete)
+    session.flush()
+    return athlete.id
+
+
+def get_or_create_secret(session: Session) -> str:
+    """Secreto para firmar las cookies de sesión (persistente en la BD)."""
+    row = session.get(AppMeta, "auth_secret")
+    if row is not None:
+        return row.value
+    import secrets
+
+    value = secrets.token_hex(32)
+    session.add(AppMeta(key="auth_secret", value=value))
+    session.flush()
+    return value
 
 
 def activity_exists(session: Session, provider: str, provider_activity_id: str) -> bool:

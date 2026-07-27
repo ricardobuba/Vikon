@@ -251,4 +251,4 @@ code { background: var(--card-2); border-radius: 5px; padding: 1px 6px; font-siz
 .ob-actions button:disabled { opacity: .6; }
 .ob-skip { text-align: center; margin-top: 12px; }
 .ob-skip a { color: var(--muted); font-size: 13px; cursor: pointer; text-decoration: underline; }
-#ob-msg { margin-top: 10px; font-size: 13px; color: var(--coral); text-align: center; }
+#ob-msg, #au-msg { margin-top: 10px; font-size: 13px; color: var(--coral); text-align: center; }

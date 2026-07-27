@@ -265,11 +265,13 @@ async function renderSettings() {
       ${s.llm.configured ? "" : `<div class="sub" style="margin-top:8px">Añade tu clave en el archivo <code>.env</code> para activar el chat.</div>`}
     </div>
 
-    <div class="card"><h3>Acerca de</h3>
+    <div class="card"><h3>Cuenta</h3>
       <div class="sub">Vikon · entrenador de ciclismo con gemelo digital. El motor decide; la IA explica.</div>
+      <button id="logout-btn" class="btn-full" style="margin-top:12px;background:var(--card-2);color:var(--text)">Cerrar sesión</button>
     </div>`;
 
   $("#edit-profile").addEventListener("click", () => showProfile({ onboarding: false }));
+  $("#logout-btn").addEventListener("click", logout);
 
   $("#goal-save").addEventListener("click", async () => {
     const date = $("#goal-date").value;
@@ -297,6 +299,49 @@ async function renderSettings() {
     } catch (e) { $("#sync-msg").textContent = e.detail || "No se pudo sincronizar (¿credenciales de Strava?)."; }
     finally { btn.disabled = false; }
   });
+}
+
+// --- Acceso (login / registro) ----------------------------------------------
+function showAuth(hasUsers) {
+  let mode = hasUsers ? "login" : "register";
+  const submit = async () => {
+    const username = $("#au-user").value.trim(), password = $("#au-pass").value;
+    if (!username || !password) { $("#au-msg").textContent = "Rellena usuario y contraseña."; return; }
+    const btn = $("#au-submit"); btn.disabled = true;
+    try {
+      await api("/api/" + mode, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      $("#auth").style.display = "none";
+      boot();                       // ahora autenticado → onboarding o app
+    } catch (e) { $("#au-msg").textContent = e.detail || "No se pudo."; btn.disabled = false; }
+  };
+  const render = () => {
+    $("#auth-card").innerHTML = `
+      <h2>Bienvenido a <span>Vikon</span></h2>
+      <div class="lead">${mode === "login" ? "Entra en tu cuenta." : "Crea tu cuenta para empezar."}</div>
+      <div class="field"><label>Usuario</label>
+        <input id="au-user" autocomplete="username" placeholder="tu usuario" /></div>
+      <div class="field"><label>Contraseña</label>
+        <input id="au-pass" type="password" placeholder="••••••"
+          autocomplete="${mode === "login" ? "current-password" : "new-password"}" /></div>
+      <div class="ob-actions"><button id="au-submit">${mode === "login" ? "Entrar" : "Crear cuenta"}</button></div>
+      <div class="ob-skip"><a id="au-toggle">${mode === "login"
+        ? "¿No tienes cuenta? Crear una" : "¿Ya tienes cuenta? Entrar"}</a></div>
+      <div id="au-msg"></div>`;
+    $("#au-submit").addEventListener("click", submit);
+    $("#au-toggle").addEventListener("click", () => { mode = mode === "login" ? "register" : "login"; render(); });
+    $("#au-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+  };
+  render();
+  $("#auth").style.display = "flex";
+  window.scrollTo(0, 0);
+}
+
+async function logout() {
+  try { await api("/api/logout", { method: "POST" }); } catch (_) {}
+  boot();
 }
 
 // --- Perfil / onboarding ----------------------------------------------------
@@ -475,8 +520,11 @@ document.querySelectorAll("#quick button").forEach((b) => b.addEventListener("cl
   }
 }));
 
-// Arranque: si no has completado el onboarding, te recibe la pantalla de perfil.
+// Arranque: (1) ¿hace falta iniciar sesión? (2) ¿falta onboarding? si no, carga.
 async function boot() {
+  let me = null;
+  try { me = await api("/api/me"); } catch (_) { /* sin backend: intenta cargar igual */ }
+  if (me && me.auth_required && !me.authenticated) { showAuth(me.has_users); return; }
   let prof = null;
   try { prof = await api("/api/profile"); } catch (_) { /* sin atleta: sigue igual */ }
   if (prof && !prof.onboarded) showProfile({ onboarding: true });

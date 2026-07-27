@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     # 0 = desactivada (solo al abrir la app / `cc sync`).
     sync_interval_s: int = 900     # 15 min
 
+    # Pantalla de acceso (cuentas). PESTILLO DE SEGURIDAD: si algo se tuerce y te
+    # deja fuera, pon AUTH_ENABLED=false en el .env y vuelves a entrar sin login
+    # (usa el primer atleta, como antes).
+    auth_enabled: bool = True
+
     @property
     def strava_redirect_uri(self) -> str:
         return f"http://localhost:{self.oauth_port}/callback"
