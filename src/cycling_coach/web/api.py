@@ -4,7 +4,10 @@ app móvil el día de mañana."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import asyncio
+import logging
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
@@ -19,6 +22,7 @@ from sqlalchemy.orm import Session
 from cycling_coach.assistant.assistant import ChatSession
 from cycling_coach.assistant.grounding import Facts, gather_facts, planning_date
 from cycling_coach.assistant.llm import LLMClient, LLMError
+from cycling_coach.config import get_settings
 from cycling_coach.db.engine import session_scope
 from cycling_coach.db.models import Athlete
 from cycling_coach.planner.planner import PlannedSession
@@ -27,6 +31,36 @@ from cycling_coach.sync import SyncError, sync_recent
 from cycling_coach.twin.coherence_service import assess_cp_coherence
 
 _STATIC = Path(__file__).parent / "static"
+_log = logging.getLogger("uvicorn.error")     # aparece en la salida del servidor
+
+
+async def _sync_loop(interval_s: int) -> None:
+    """Sincroniza con Strava en segundo plano cada `interval_s` mientras el
+    servidor corre → los entrenamientos entran solos, sin abrir la app."""
+    _log.info("Sync automático con Strava activo (cada %ds).", interval_s)
+    while True:
+        try:
+            r = await asyncio.to_thread(sync_recent, fetch_streams=True)
+            _log.info(
+                "Sync automático: %d nuevas, %d ya existentes.",
+                r.activities_ingested, r.skipped_existing,
+            )
+        except SyncError as exc:
+            _log.warning("sync automático falló: %s", exc)
+        except Exception:                       # nunca tumbar el bucle
+            _log.exception("sync automático: error inesperado")
+        await asyncio.sleep(interval_s)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    interval = get_settings().sync_interval_s
+    task = asyncio.create_task(_sync_loop(interval)) if interval > 0 else None
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
 
 
 def _db() -> Iterator[Session]:
@@ -83,7 +117,7 @@ class ChatIn(BaseModel):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Vikon", docs_url="/api/docs")
+    app = FastAPI(title="Vikon", docs_url="/api/docs", lifespan=_lifespan)
     chat_state: dict[str, ChatSession] = {}     # una conversación (single-user local)
 
     @app.get("/api/state")

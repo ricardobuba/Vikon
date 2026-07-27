@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     llm_model: str = "llama-3.3-70b-versatile"
     llm_temperature: float = 0.4
 
+    # Sincronización automática con Strava mientras el servidor corre (segundos).
+    # 0 = desactivada (solo al abrir la app / `cc sync`).
+    sync_interval_s: int = 900     # 15 min
+
     @property
     def strava_redirect_uri(self) -> str:
         return f"http://localhost:{self.oauth_port}/callback"
