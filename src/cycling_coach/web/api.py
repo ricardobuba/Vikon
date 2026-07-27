@@ -241,6 +241,33 @@ def create_app() -> FastAPI:
             for p in series if p.day >= cutoff
         ]
 
+    @app.get("/api/form-forecast")
+    def form_forecast(
+        session: DB, aid: AID, past: int = 60, future: int = 7
+    ) -> list[dict[str, Any]]:
+        """Forma REAL de los últimos `past` días + PROYECCIÓN del horizonte de los
+        próximos `future` (para ver hacia dónde va tu forma). `projected` marca el
+        tramo futuro (se dibuja punteado)."""
+        dli = daily_load_and_intensity(session, aid, date.today())
+        if not dli:
+            return []
+        series = compute_ctl_atl_tsb({d: v[0] for d, v in dli.items()})
+        cutoff = date.today() - timedelta(days=past)
+        past_pts = [p for p in series if p.day >= cutoff]
+        out: list[dict[str, Any]] = [
+            {"day": p.day.isoformat(), "ctl": round(p.ctl, 1),
+             "tsb": round(p.tsb, 1), "projected": False}
+            for p in past_pts
+        ]
+        last_real = past_pts[-1].day if past_pts else None
+        start, _ = planning_date(session, aid, date.today())
+        for h in plan_horizon(session, aid, start, days=future):
+            if last_real is not None and h.day <= last_real:
+                continue                       # evita duplicar el día de la unión
+            out.append({"day": h.day.isoformat(), "ctl": round(h.ctl, 1),
+                        "tsb": round(h.tsb, 1), "projected": True})
+        return out
+
     @app.get("/api/ftp")
     def ftp_history(session: DB, aid: AID) -> list[dict[str, Any]]:
         """Evolución de FTP y CP en el tiempo (submuestreada, ~semanal)."""

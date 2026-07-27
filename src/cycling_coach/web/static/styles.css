@@ -170,6 +170,18 @@ nav button.active { color: var(--cyan); }
 .card .big { font-family: 'Sora'; font-weight: 700; font-size: 22px; }
 .card svg { width: 100%; height: auto; display: block; overflow: visible; }
 
+/* --- Gráficas interactivas (tooltip + crosshair) --- */
+.chart-wrap { position: relative; }
+.chart-tip {
+  position: absolute; top: 4px; transform: translateX(-50%);
+  background: var(--card-2); border: 1px solid #2a2f3a; border-radius: 9px;
+  padding: 6px 9px; font-size: 11px; pointer-events: none; white-space: nowrap;
+  box-shadow: 0 6px 16px rgba(0,0,0,.45); z-index: 5;
+}
+.chart-tip b { display: block; color: var(--text); font-family: 'Sora'; font-size: 10px; margin-bottom: 3px; }
+.chart-tip span { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+.chart-tip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
 .legend { display: flex; gap: 14px; margin-top: 10px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }

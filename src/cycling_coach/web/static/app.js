@@ -18,65 +18,17 @@ function niceTicks(min, max, count = 4) {
   return ticks;
 }
 
-// Gráfica de líneas con EJES ETIQUETADOS. series: [{vals,color,fill,dash}].
-// opts: {h, zeroLine, yfmt, xlabels:[{i,text}], ylabel}
-function chart(series, opts = {}) {
-  const W = 340, H = opts.h || 168;
-  const mL = 38, mR = 10, mT = 10, mB = 22;
-  const iw = W - mL - mR, ih = H - mT - mB;
-  const all = series.flatMap((s) => s.vals).filter((v) => v != null);
-  if (all.length < 2) return `<div class="sub">sin datos suficientes</div>`;
-  let min = Math.min(...all), max = Math.max(...all);
-  if (min === max) { min -= 1; max += 1; }
-  const pad = (max - min) * 0.12; min -= pad; max += pad;
-  const n = Math.max(...series.map((s) => s.vals.length));
-  const X = (i) => mL + (n <= 1 ? iw / 2 : i / (n - 1) * iw);
-  const Y = (v) => mT + (1 - (v - min) / (max - min)) * ih;
-  const yfmt = opts.yfmt || ((v) => Math.round(v));
-
-  // rejilla + etiquetas del eje Y
-  let grid = niceTicks(min, max, 4).map((v) => {
-    const y = Y(v).toFixed(1);
-    return `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="#ffffff10"/>`
-      + `<text x="${mL - 5}" y="${(+y + 3).toFixed(1)}" fill="var(--muted)" font-size="9" text-anchor="end">${yfmt(v)}</text>`;
-  }).join("");
-  if (opts.zeroLine && min < 0 && max > 0) {
-    const zy = Y(0).toFixed(1);
-    grid += `<line x1="${mL}" y1="${zy}" x2="${W - mR}" y2="${zy}" stroke="#ffffff40" stroke-dasharray="3 3"/>`;
-  }
-
-  const paths = series.map((s) => {
-    const pts = s.vals.map((v, i) => v == null ? null : `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).filter(Boolean);
-    if (pts.length < 2) return "";
-    const d = "M" + pts.join(" L");
-    const base = (mT + ih).toFixed(1);
-    const area = s.fill ? `<path d="${d} L${X(s.vals.length - 1).toFixed(1)},${base} L${X(0).toFixed(1)},${base} Z" fill="${s.color}" opacity="0.10"/>` : "";
-    const dash = s.dash ? `stroke-dasharray="4 3"` : "";
-    return `${area}<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" ${dash}/>`;
-  }).join("");
-
-  const xlab = (opts.xlabels || []).map((t) =>
-    `<text x="${X(t.i).toFixed(1)}" y="${H - 6}" fill="var(--muted)" font-size="9" text-anchor="middle">${t.text}</text>`
-  ).join("");
-
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${paths}${xlab}</svg>`;
-}
-
-// Tres marcas de fecha (inicio · medio · fin) para una serie diaria. Si la serie
-// abarca varios años (p. ej. la evolución del FTP), muestra el año para no
-// confundir (ordena por fecha real, no por día/mes suelto).
-function dateTicks(days) {
-  const n = days.length;
-  if (!n) return [];
-  const spanYears = new Date(days[0]).getFullYear() !== new Date(days[n - 1]).getFullYear();
-  const label = (iso) => spanYears
-    ? new Date(iso).toLocaleDateString("es-ES", { month: "short", year: "2-digit" })
-    : shortDate(iso);
-  return [0, Math.floor(n / 2), n - 1].map((i) => ({ i, text: label(days[i]) }));
-}
-
 const legend = (items) => `<div class="legend">${items.map((i) =>
   `<span><i class="dot" style="background:${i.color}"></i>${i.label}</span>`).join("")}</div>`;
+
+// Etiquetas de fecha por punto (con año si la serie cruza años).
+function labelDates(isoArr) {
+  if (!isoArr.length) return [];
+  const spanY = new Date(isoArr[0]).getFullYear() !== new Date(isoArr[isoArr.length - 1]).getFullYear();
+  return isoArr.map((iso) => spanY
+    ? new Date(iso).toLocaleDateString("es-ES", { month: "short", year: "2-digit" })
+    : shortDate(iso));
+}
 
 // Curva de potencia: eje X logarítmico (5 s → 1 h), real vs modelo CP/W'.
 function powerChart(points, cp) {
@@ -122,6 +74,90 @@ function powerChart(points, cp) {
     + `${line("predicted", "#2E7DFF", true)}${line("actual", "#2BC4FF", false)}${dots}</svg>`;
 }
 
+// Gráfica de líneas INTERACTIVA (tocar/pasar el dedo → valores). Soporta un
+// tramo futuro punteado (splitIndex = "HOY"). series:[{vals,color,name,fill}].
+function mountChart(el, { dates, series, zeroLine = false, yunit = "", splitIndex = null }) {
+  const W = 344, H = 188, mL = 38, mR = 12, mT = 12, mB = 22;
+  const iw = W - mL - mR, ih = H - mT - mB;
+  const all = series.flatMap((s) => s.vals).filter((v) => v != null);
+  if (all.length < 2) { el.innerHTML = `<div class="sub">sin datos suficientes</div>`; return; }
+  let min = Math.min(...all), max = Math.max(...all);
+  if (min === max) { min -= 1; max += 1; }
+  const pad = (max - min) * 0.12; min -= pad; max += pad;
+  const n = dates.length;
+  const X = (i) => mL + (n <= 1 ? iw / 2 : i / (n - 1) * iw);
+  const Y = (v) => mT + (1 - (v - min) / (max - min)) * ih;
+
+  let grid = niceTicks(min, max, 4).map((v) => {
+    const y = Y(v).toFixed(1);
+    return `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="#ffffff10"/>`
+      + `<text x="${mL - 5}" y="${(+y + 3).toFixed(1)}" fill="var(--muted)" font-size="9" text-anchor="end">${Math.round(v)}${yunit}</text>`;
+  }).join("");
+  if (zeroLine && min < 0 && max > 0) {
+    const zy = Y(0).toFixed(1);
+    grid += `<line x1="${mL}" y1="${zy}" x2="${W - mR}" y2="${zy}" stroke="#ffffff40" stroke-dasharray="3 3"/>`;
+  }
+  // Línea "HOY" (frontera pasado/futuro)
+  if (splitIndex != null && splitIndex < n - 1) {
+    const sx = X(splitIndex).toFixed(1);
+    grid += `<line x1="${sx}" y1="${mT}" x2="${sx}" y2="${mT + ih}" stroke="#ffffff33" stroke-dasharray="2 3"/>`
+      + `<text x="${sx}" y="${mT - 3}" fill="var(--muted)" font-size="9" text-anchor="middle">HOY</text>`;
+  }
+
+  const seg = (vals, a, b, color, dash) => {
+    const pts = [];
+    for (let i = a; i <= b; i++) if (vals[i] != null) pts.push(`${X(i).toFixed(1)},${Y(vals[i]).toFixed(1)}`);
+    if (pts.length < 2) return "";
+    return `<path d="M${pts.join(" L")}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" ${dash ? 'stroke-dasharray="5 3"' : ""}/>`;
+  };
+  const paths = series.map((s) => {
+    const sp = splitIndex == null ? n - 1 : splitIndex;
+    const area = s.fill ? (() => {
+      const pts = [];
+      for (let i = 0; i < n; i++) if (s.vals[i] != null) pts.push(`${X(i).toFixed(1)},${Y(s.vals[i]).toFixed(1)}`);
+      if (pts.length < 2) return "";
+      return `<path d="M${pts.join(" L")} L${X(n - 1).toFixed(1)},${(mT + ih).toFixed(1)} L${X(0).toFixed(1)},${(mT + ih).toFixed(1)} Z" fill="${s.color}" opacity="0.08"/>`;
+    })() : "";
+    return area + seg(s.vals, 0, sp, s.color, false) + seg(s.vals, sp, n - 1, s.color, true);
+  }).join("");
+
+  const ticks = [0, Math.floor(n / 2), n - 1].map((i) =>
+    `<text x="${X(i).toFixed(1)}" y="${H - 6}" fill="var(--muted)" font-size="9" text-anchor="middle">${dates[i]}</text>`).join("");
+
+  el.innerHTML =
+    `<div class="chart-wrap">
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
+        ${grid}${paths}${ticks}
+        <g class="cross"></g>
+        <rect x="${mL}" y="${mT}" width="${iw}" height="${ih}" fill="transparent" style="touch-action:none"/>
+      </svg>
+      <div class="chart-tip" style="display:none"></div>
+    </div>`
+    + legend(series.filter((s) => s.name).map((s) => ({ color: s.color, label: s.name })));
+
+  const svg = el.querySelector("svg");
+  const cross = el.querySelector(".cross");
+  const tip = el.querySelector(".chart-tip");
+  const move = (clientX) => {
+    const r = svg.getBoundingClientRect();
+    const vbx = (clientX - r.left) * (W / r.width);
+    let i = Math.round((vbx - mL) / iw * (n - 1));
+    i = Math.max(0, Math.min(n - 1, i));
+    const cx = X(i).toFixed(1);
+    cross.innerHTML = `<line x1="${cx}" y1="${mT}" x2="${cx}" y2="${mT + ih}" stroke="#ffffff55"/>`
+      + series.map((s) => s.vals[i] == null ? "" :
+        `<circle cx="${cx}" cy="${Y(s.vals[i]).toFixed(1)}" r="3" fill="${s.color}" stroke="#0b0e14" stroke-width="1.5"/>`).join("");
+    tip.style.display = "block";
+    tip.style.left = Math.max(15, Math.min(85, X(i) / W * 100)) + "%";
+    tip.innerHTML = `<b>${dates[i] || ""}</b>` + series.map((s) => s.vals[i] == null ? "" :
+      `<span><i style="background:${s.color}"></i>${s.name || ""} ${s.vals[i]}${yunit}</span>`).join("");
+  };
+  const hide = () => { cross.innerHTML = ""; tip.style.display = "none"; };
+  svg.addEventListener("pointermove", (e) => move(e.clientX));
+  svg.addEventListener("pointerdown", (e) => move(e.clientX));
+  svg.addEventListener("pointerleave", hide);
+}
+
 // --- Pantalla HOY -----------------------------------------------------------
 function renderHome(s) {
   const p = s.plan;
@@ -155,17 +191,21 @@ function renderHome(s) {
       <div class="stat"><span class="num">${fmt(s.ftp)}</span><span class="k">FTP W</span></div>
     </div>
     ${goal}
-    <div class="card" id="form-chart"><h3>Forma · últimos 90 días</h3><div class="sub">Fitness (CTL) y frescura (TSB)</div><div id="form-svg" class="loading" style="padding:20px">…</div></div>
+    <div class="card"><h3>Forma y predicción</h3><div class="sub">Fitness (CTL) y frescura (TSB) · 60 días + próximos 7 (punteado). Toca la gráfica.</div><div id="form-svg" class="loading" style="padding:20px">…</div></div>
     ${p ? `<div class="rationale">${p.rationale}</div>` : ""}`;
-  // gráfica de forma (async)
-  api("/api/trend?days=90").then((t) => {
+  // gráfica de forma + predicción (interactiva)
+  api("/api/form-forecast?past=60&future=7").then((t) => {
     if (!t.length) { $("#form-svg").innerHTML = `<div class="sub">sin datos</div>`; return; }
-    $("#form-svg").outerHTML = chart([
-      { vals: t.map((d) => d.ctl), color: "#2BC4FF", fill: true },
-      { vals: t.map((d) => d.tsb), color: "#2E7DFF" },
-    ], { zeroLine: true, xlabels: dateTicks(t.map((d) => d.day)) }) + legend([
-      { color: "#2BC4FF", label: "Fitness (CTL)" }, { color: "#2E7DFF", label: "Forma (TSB)" },
-    ]);
+    let split = t.findIndex((d) => d.projected);
+    split = split < 0 ? t.length - 1 : split - 1;
+    mountChart($("#form-svg"), {
+      dates: labelDates(t.map((d) => d.day)),
+      series: [
+        { vals: t.map((d) => d.ctl), color: "#2BC4FF", name: "Fitness (CTL)", fill: true },
+        { vals: t.map((d) => d.tsb), color: "#2E7DFF", name: "Forma (TSB)" },
+      ],
+      zeroLine: true, splitIndex: split,
+    });
   }).catch(() => { $("#form-svg").innerHTML = `<div class="sub">—</div>`; });
 }
 
@@ -178,16 +218,12 @@ async function renderProgress() {
     api("/api/power-curve").catch(() => null),
   ]);
   let html = "";
-  // Evolución FTP / CP
+  // Evolución FTP / CP (interactiva)
   if (ftp.length) {
     const cur = ftp[ftp.length - 1];
     html += `<div class="card"><h3>Evolución de tu motor</h3>
-      <div class="sub">FTP ${cur.ftp} W · CP ${cur.cp} W</div>
-      ${chart([
-        { vals: ftp.map((d) => d.ftp), color: "#2E7DFF", fill: true },
-        { vals: ftp.map((d) => d.cp), color: "#2BC4FF" },
-      ], { h: 150, yfmt: (v) => Math.round(v) + "W", xlabels: dateTicks(ftp.map((d) => d.day)) })}
-      ${legend([{ color: "#2E7DFF", label: "FTP" }, { color: "#2BC4FF", label: "CP" }])}</div>`;
+      <div class="sub">FTP ${cur.ftp} W · CP ${cur.cp} W · toca la gráfica</div>
+      <div id="ftp-chart"></div></div>`;
   }
   // Curva de potencia (real vs modelo) + coherencia del CP
   if (pc) {
@@ -198,6 +234,15 @@ async function renderProgress() {
       ${pc.verdict ? `<div class="verdict ${pc.coherent ? "ok" : "warn"}">${pc.verdict}</div>` : ""}</div>`;
   }
   box.innerHTML = html || `<div class="loading">Sin datos de potencia todavía.</div>`;
+  if (ftp.length) {
+    mountChart($("#ftp-chart"), {
+      dates: labelDates(ftp.map((d) => d.day)), yunit: "W",
+      series: [
+        { vals: ftp.map((d) => d.ftp), color: "#2E7DFF", name: "FTP", fill: true },
+        { vals: ftp.map((d) => d.cp), color: "#2BC4FF", name: "CP" },
+      ],
+    });
+  }
 }
 
 function renderHorizon(days) {
