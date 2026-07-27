@@ -8,7 +8,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -25,10 +25,12 @@ from cycling_coach.assistant.llm import LLMClient, LLMError
 from cycling_coach.config import get_settings
 from cycling_coach.db.engine import session_scope
 from cycling_coach.db.models import Athlete
+from cycling_coach.physiology import compute_ctl_atl_tsb
 from cycling_coach.planner.planner import PlannedSession
 from cycling_coach.planner.service import plan_horizon
 from cycling_coach.sync import SyncError, sync_recent
 from cycling_coach.twin.coherence_service import assess_cp_coherence
+from cycling_coach.twin.load_service import daily_load_and_intensity, smoothed_cp_states
 
 _STATIC = Path(__file__).parent / "static"
 _log = logging.getLogger("uvicorn.error")     # aparece en la salida del servidor
@@ -120,6 +122,13 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Vikon", docs_url="/api/docs", lifespan=_lifespan)
     chat_state: dict[str, ChatSession] = {}     # una conversación (single-user local)
 
+    @app.middleware("http")
+    async def _no_cache_static(request, call_next):  # dev: siempre servir estáticos frescos
+        resp = await call_next(request)
+        if request.url.path.startswith("/static") or request.url.path == "/":
+            resp.headers["Cache-Control"] = "no-store"
+        return resp
+
     @app.get("/api/state")
     def state(session: DB) -> dict[str, Any]:
         aid = _athlete_id(session)
@@ -143,6 +152,36 @@ def create_app() -> FastAPI:
             }
             for h in plan_horizon(session, aid, start, days=days)
         ]
+
+    @app.get("/api/trend")
+    def trend(session: DB, days: int = 90) -> list[dict[str, Any]]:
+        """Serie de forma (CTL/ATL/TSB) de los últimos `days` días para gráficas."""
+        aid = _athlete_id(session)
+        dli = daily_load_and_intensity(session, aid, date.today())
+        if not dli:
+            return []
+        series = compute_ctl_atl_tsb({d: v[0] for d, v in dli.items()})
+        cutoff = date.today() - timedelta(days=days)
+        return [
+            {"day": p.day.isoformat(), "ctl": round(p.ctl, 1),
+             "atl": round(p.atl, 1), "tsb": round(p.tsb, 1)}
+            for p in series if p.day >= cutoff
+        ]
+
+    @app.get("/api/ftp")
+    def ftp_history(session: DB) -> list[dict[str, Any]]:
+        """Evolución de FTP y CP en el tiempo (submuestreada, ~semanal)."""
+        aid = _athlete_id(session)
+        states = smoothed_cp_states(session, aid)
+        out: list[dict[str, Any]] = []
+        last: date | None = None
+        for s in sorted(states, key=lambda s: s.as_of):
+            d = s.as_of.date()
+            if last is None or (d - last).days >= 7:
+                out.append({"day": d.isoformat(), "ftp": round(s.ftp_w),
+                            "cp": round(s.cp.mean)})
+                last = d
+        return out
 
     @app.get("/api/coherence")
     def coherence(session: DB) -> dict[str, Any]:

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=2" />
 </head>
 <body>
   <div class="app">
@@ -22,6 +22,11 @@
       <!-- HOY -->
       <section id="home-view">
         <div id="home-content"><div class="loading">Cargando tu estado…</div></div>
+      </section>
+
+      <!-- PROGRESO -->
+      <section id="progress-view" style="display:none">
+        <div id="progress-content"><div class="loading">Cargando progreso…</div></div>
       </section>
 
       <!-- HORIZONTE -->
@@ -45,10 +50,11 @@
 
     <nav>
       <button data-view="home" class="active"><span class="ico">🏠</span>Hoy</button>
-      <button data-view="horizon"><span class="ico">📈</span>Horizonte</button>
+      <button data-view="progress"><span class="ico">📊</span>Progreso</button>
+      <button data-view="horizon"><span class="ico">📈</span>Plan</button>
       <button data-view="chat"><span class="ico">💬</span>Vikon</button>
     </nav>
   </div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=2"></script>
 </body>
 </html>

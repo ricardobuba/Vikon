@@ -147,3 +147,31 @@ nav button .ico { font-size: 18px; }
 nav button.active { color: var(--cyan); }
 
 .loading { color: var(--muted); text-align: center; padding: 40px; font-size: 14px; }
+
+/* --- Tarjetas y gráficas (Hoy rica + Progreso) --- */
+.card { background: var(--card); border-radius: var(--radius); padding: 16px; margin-top: 14px; }
+.card h3 { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.card .sub { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+.card .big { font-family: 'Sora'; font-weight: 700; font-size: 22px; }
+.card svg { width: 100%; height: auto; display: block; overflow: visible; }
+
+.legend { display: flex; gap: 14px; margin-top: 10px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+.pcbar { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 12px; }
+.pcbar .lbl { width: 42px; color: var(--muted); }
+.pcbar .track { flex: 1; height: 16px; background: var(--card-2); border-radius: 8px; position: relative; overflow: hidden; }
+.pcbar .fill { height: 100%; border-radius: 8px; background: var(--grad); }
+.pcbar .val { width: 44px; text-align: right; font-family: 'Sora'; color: var(--text); }
+.pcbar.exceed .fill { background: linear-gradient(90deg, var(--coral), #ffa07a); }
+
+.verdict { margin-top: 12px; font-size: 13px; line-height: 1.5; padding: 12px; border-radius: 12px; background: var(--card-2); }
+.verdict.ok { border-left: 3px solid var(--teal); }
+.verdict.warn { border-left: 3px solid var(--coral); }
+
+.act { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid #23283340; font-size: 13px; }
+.act:last-child { border-bottom: none; }
+.act .ad { width: 52px; color: var(--muted); font-size: 12px; }
+.act .an { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act .at { font-family: 'Sora'; color: var(--cyan); font-size: 12px; }
