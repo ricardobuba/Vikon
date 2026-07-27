@@ -174,7 +174,8 @@ def test_chat_sticky_intent(monkeypatch):
         def chat(self, messages, **kw):
             return "ok"
 
-    def _fake_gather(session, athlete_id, as_of, *, minutes=None, cri_override=None):
+    def _fake_gather(session, athlete_id, as_of, *, minutes=None, cri_override=None,
+                     with_horizon=False):
         calls["minutes"].append(minutes)
         calls["cri"].append(cri_override)
         return Facts(as_of=as_of)

@@ -126,6 +126,7 @@ def ask(
 
     facts = gather_facts(
         session, athlete_id, as_of, minutes=intent.minutes, cri_override=cri_override,
+        with_horizon=True,
     )
     question = intent.question if intent.kind == "question" else None
     block = facts.to_prompt()
@@ -178,7 +179,7 @@ class ChatSession:
 
         facts = gather_facts(
             session, self.athlete_id, self.as_of,
-            minutes=self.minutes, cri_override=cri_override,
+            minutes=self.minutes, cri_override=cri_override, with_horizon=True,
         )
         block = facts.to_prompt()
         if logged:

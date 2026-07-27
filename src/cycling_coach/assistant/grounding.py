@@ -16,7 +16,12 @@ from cycling_coach.db.repositories import (
     next_goal,
     training_seconds_on,
 )
-from cycling_coach.planner.planner import PlannedSession, phase_for, plan_session
+from cycling_coach.planner.planner import (
+    PlannedSession,
+    phase_for,
+    plan_session,
+    roll_horizon,
+)
 from cycling_coach.twin.cri_service import compute_cri_service
 from cycling_coach.twin.load_service import build_training_context
 
@@ -42,6 +47,7 @@ class Facts:
     trained_today: bool = False          # ¿ya entrenó hoy?
     trained_minutes: int = 0
     plan_date: date | None = None        # día que planifica el plan (hoy o mañana)
+    horizon: list[dict] = field(default_factory=list)   # próximos días (proyección)
 
     def to_prompt(self) -> str:
         """Serializa la ficha para el prompt (texto plano, claro y acotado)."""
@@ -91,6 +97,16 @@ class Facts:
             if p.targets:
                 L.append("Bloques: " + " | ".join(p.targets))
             L.append(f"Razón del motor: {p.rationale}")
+        if self.horizon:
+            L.append(
+                "Plan proyectado de los próximos días (solo hoy se compromete; el "
+                "resto se re-planifica con datos nuevos):"
+            )
+            for h in self.horizon:
+                L.append(
+                    f"  {h['day']}: {h['objective']} — {h['session']} "
+                    f"({h['minutes']} min, ~{h['tss']} TSS)"
+                )
         return "\n".join(L)
 
 
@@ -108,9 +124,11 @@ def gather_facts(
     *,
     minutes: float | None = None,
     cri_override: float | None = None,
+    with_horizon: bool = False,
 ) -> Facts:
     """Construye la ficha. `minutes`/`cri_override` (si vienen del intent) se
-    pasan al planificador determinista antes de calcular el plan."""
+    pasan al planificador determinista antes de calcular el plan. `with_horizon`
+    proyecta la semana (para el chat); off en la pantalla Hoy (ahorra cálculo)."""
     facts = Facts(as_of=as_of)
     facts.ftp = latest_parameter_estimate(session, athlete_id, "ftp")
     facts.cp = latest_parameter_estimate(session, athlete_id, "cp")
@@ -149,4 +167,19 @@ def gather_facts(
             cri=cri, context=ctx, minutes=minutes,
             phase=phase_for(facts.days_to_event), days_to_event=facts.days_to_event,
         )
+        # Horizonte de la semana para que el chat conozca el plan futuro.
+        facts.horizon = [] if not with_horizon else [
+            {
+                "day": h.day.isoformat(),
+                "objective": h.plan.objective.value,
+                "session": h.plan.template.name,
+                "minutes": round(h.plan.template.total_minutes()),
+                "tss": round(h.tss),
+            }
+            for h in roll_horizon(
+                ftp=facts.ftp, ctl=current.ctl, atl=current.atl, context=ctx,
+                cri=cri, days=7, start=plan_date,
+                days_to_event=facts.days_to_event, minutes=minutes,
+            )
+        ]
     return facts
