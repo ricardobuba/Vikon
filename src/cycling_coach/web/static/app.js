@@ -160,7 +160,10 @@ async function sendChat() {
 function show(view) {
   ["home", "progress", "horizon", "chat"].forEach((v) => { $(`#${v}-view`).style.display = v === view ? "block" : "none"; });
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  $("#chat-input").style.display = view === "chat" ? "flex" : "none";
+  const isChat = view === "chat";
+  $("#chat-input").style.display = isChat ? "flex" : "none";
+  $("#quick").style.display = isChat ? "flex" : "none";
+  if (isChat) $("#chat-text").focus();
   if (view === "horizon") loadHorizon();
   if (view === "progress") renderProgress();
 }
@@ -186,4 +189,12 @@ $("#today").textContent = new Date().toLocaleDateString("es-ES", { weekday: "lon
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => show(b.dataset.view)));
 $("#chat-send").addEventListener("click", sendChat);
 $("#chat-text").addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
+document.querySelectorAll("#quick button").forEach((b) => b.addEventListener("click", () => {
+  if (b.dataset.log) {
+    $("#chat-text").placeholder = "Ej: peso 72, dormí 6h, me siento un 4/10";
+    $("#chat-text").focus();
+  } else {
+    $("#chat-text").value = b.dataset.q; sendChat();
+  }
+}));
 syncThenLoad();

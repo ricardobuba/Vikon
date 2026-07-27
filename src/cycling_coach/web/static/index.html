@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css?v=2" />
+  <link rel="stylesheet" href="/static/styles.css?v=3" />
 </head>
 <body>
   <div class="app">
@@ -38,11 +38,17 @@
       <!-- CHAT -->
       <section id="chat-view">
         <div class="chat-log" id="chat-log">
-          <div class="msg bot">¡Hola! Soy Vikon. Pregúntame qué toca hoy, dime cuánto tiempo tienes o cómo te encuentras.</div>
+          <div class="msg bot">¡Hola! Soy Vikon. Pregúntame qué toca hoy, dime cuánto tiempo tienes, cómo te encuentras, o registra tu peso y sueño.</div>
         </div>
       </section>
     </main>
 
+    <div class="quick" id="quick">
+      <button data-q="¿Qué hago hoy?">🚴 ¿Qué hago hoy?</button>
+      <button data-q="¿Cómo voy de forma?">📊 ¿Cómo voy?</button>
+      <button data-q="Hoy me siento cansado">😮‍💨 Me siento cansado</button>
+      <button data-q="" data-log="1">📝 Registrar</button>
+    </div>
     <div class="chat-input" id="chat-input">
       <input id="chat-text" placeholder="Escribe a Vikon…" autocomplete="off" />
       <button id="chat-send">➤</button>
@@ -55,6 +61,6 @@
       <button data-view="chat"><span class="ico">💬</span>Vikon</button>
     </nav>
   </div>
-  <script src="/static/app.js?v=2"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>
