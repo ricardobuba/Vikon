@@ -179,9 +179,14 @@ async function loadHorizon() {
   catch (e) { $("#horizon-content").innerHTML = `<div class="loading">${e.detail || "Error."}</div>`; }
 }
 async function syncThenLoad() {
-  $("#home-content").innerHTML = `<div class="loading">Sincronizando con Strava…</div>`;
-  try { const r = await api("/api/refresh", { method: "POST" }); if (r.new > 0) horizonLoaded = false; } catch (_) {}
-  loadHome();
+  loadHome();                       // pinta ya con lo que haya en BD (no bloquea)
+  try {                             // sincroniza en 2º plano, con timeout: nunca cuelga
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 12000);
+    const r = await api("/api/refresh", { method: "POST", signal: ctrl.signal });
+    clearTimeout(t);
+    if (r.new > 0) { horizonLoaded = false; loadHome(); }   // datos nuevos → refresca
+  } catch (_) { /* sin conexión/credenciales/timeout: seguimos con lo cargado */ }
 }
 
 // --- Init -------------------------------------------------------------------
