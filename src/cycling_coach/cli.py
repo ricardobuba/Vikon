@@ -749,15 +749,43 @@ def sync_cmd(
 
 
 # --------------------------------------------------------------------------- #
+def _lan_ip() -> str | None:
+    """IP de este PC en la red local (para abrir la app desde el móvil). No
+    envía tráfico: solo consulta qué interfaz saldría hacia fuera."""
+    import socket
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))   # no viaja ningún paquete
+        return s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+
+
 @app.command("serve")
 def serve_cmd(
     port: int = typer.Option(8730, help="Puerto del servidor web."),
-    host: str = typer.Option("127.0.0.1", help="Host."),
+    host: str = typer.Option(
+        "0.0.0.0", help="Host. 0.0.0.0 = accesible desde el móvil en la misma WiFi."
+    ),
 ) -> None:
     """Lanza la UI web (FastAPI) — pantalla Hoy + horizonte + chat con Vikon."""
     import uvicorn
 
-    typer.secho(f"Vikon en http://{host}:{port}", fg=typer.colors.CYAN, bold=True)
+    typer.secho(f"Vikon en http://localhost:{port}", fg=typer.colors.CYAN, bold=True)
+    if host == "0.0.0.0":
+        lan = _lan_ip()
+        if lan:
+            typer.secho(
+                f"  Desde el móvil (misma WiFi):  http://{lan}:{port}",
+                fg=typer.colors.GREEN, bold=True,
+            )
+        typer.secho(
+            "  (si el móvil no conecta, permite el puerto en el firewall de Windows)",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
     uvicorn.run("cycling_coach.web.api:app", host=host, port=port, reload=False)
 
 

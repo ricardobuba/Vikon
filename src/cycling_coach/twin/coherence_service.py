@@ -18,6 +18,12 @@ from cycling_coach.physiology.coherence import CoherenceReport, assess_coherence
 # Duraciones CP-relevantes (de 1 min a 60 min).
 _DURATIONS_S = [60, 120, 180, 300, 600, 900, 1200, 1800, 2700, 3600]
 
+# Curva de potencia completa: incluye el tramo anaeróbico/sprint (5 s–1 min) que
+# el CP de 2 parámetros NO modela, para verla entera (importa a un puncheur).
+_CURVE_DURATIONS_S = [5, 15, 30, 60, 120, 300, 600, 900, 1200, 1800, 2700, 3600]
+# Por debajo de esto el modelo 2-param (CP+W'/t) no es fiable (→∞): no lo dibujamos.
+_MODEL_MIN_S = 120
+
 
 def recent_mmp(
     session: Session, athlete_id: int, as_of: date, days: int
@@ -48,3 +54,46 @@ def assess_cp_coherence(
     if not mmp:
         return None
     return assess_coherence(cp, wp, mmp)
+
+
+def power_curve(
+    session: Session, athlete_id: int, as_of: date, days: int = 120
+) -> dict | None:
+    """Curva de potencia real (mejor por duración, 5 s–1 h) + predicción del
+    modelo CP/W' en el tramo donde es válido (≥2 min) + veredicto de coherencia.
+    Una sola pasada por los streams. None si no hay potencia reciente."""
+    cp = latest_parameter_estimate(session, athlete_id, "cp")
+    wp = latest_parameter_estimate(session, athlete_id, "w_prime")
+    cutoff = as_of - timedelta(days=days)
+    agg: dict[int, float] = {}
+    for start, _aid, watts in load_power_activities(session, athlete_id):
+        if start.date() < cutoff:
+            continue
+        for secs, power in mean_maximal_power(watts, _CURVE_DURATIONS_S).items():
+            if power > agg.get(secs, 0.0):
+                agg[secs] = power
+    if not agg:
+        return None
+
+    points = []
+    for secs in _CURVE_DURATIONS_S:
+        actual = agg.get(secs)
+        predicted = (
+            cp + wp / secs if (cp and wp and secs >= _MODEL_MIN_S) else None
+        )
+        points.append(
+            {"seconds": secs, "actual": actual, "predicted": predicted}
+        )
+
+    report = None
+    if cp and wp:
+        sub = {s: p for s, p in agg.items() if s >= 60}
+        if sub:
+            report = assess_coherence(cp, wp, sub)
+    return {
+        "cp": cp,
+        "w_prime": wp,
+        "points": points,
+        "verdict": report.verdict if report else None,
+        "coherent": report.coherent if report else None,
+    }

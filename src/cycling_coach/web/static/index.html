@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css?v=4" />
+  <link rel="stylesheet" href="/static/styles.css?v=5" />
 </head>
 <body>
   <div class="app">
@@ -41,6 +41,11 @@
           <div class="msg bot">¡Hola! Soy Vikon. Pregúntame qué toca hoy, dime cuánto tiempo tienes, cómo te encuentras, o registra tu peso y sueño.</div>
         </div>
       </section>
+
+      <!-- AJUSTES -->
+      <section id="settings-view" style="display:none">
+        <div id="settings-content"><div class="loading">Cargando ajustes…</div></div>
+      </section>
     </main>
 
     <div class="quick" id="quick">
@@ -59,8 +64,9 @@
       <button data-view="progress"><span class="ico">📊</span>Progreso</button>
       <button data-view="horizon"><span class="ico">📈</span>Plan</button>
       <button data-view="chat"><span class="ico">💬</span>Vikon</button>
+      <button data-view="settings"><span class="ico">⚙️</span>Ajustes</button>
     </nav>
   </div>
-  <script src="/static/app.js?v=4"></script>
+  <script src="/static/app.js?v=6"></script>
 </body>
 </html>

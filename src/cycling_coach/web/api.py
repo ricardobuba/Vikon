@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from cycling_coach.assistant.assistant import ChatSession
@@ -24,12 +24,13 @@ from cycling_coach.assistant.grounding import Facts, gather_facts, planning_date
 from cycling_coach.assistant.llm import LLMClient, LLMError
 from cycling_coach.config import get_settings
 from cycling_coach.db.engine import session_scope
-from cycling_coach.db.models import Athlete
+from cycling_coach.db.models import Activity, Athlete
+from cycling_coach.db.repositories import add_goal, next_goal
 from cycling_coach.physiology import compute_ctl_atl_tsb
 from cycling_coach.planner.planner import PlannedSession
 from cycling_coach.planner.service import plan_horizon
 from cycling_coach.sync import SyncError, sync_recent
-from cycling_coach.twin.coherence_service import assess_cp_coherence
+from cycling_coach.twin.coherence_service import assess_cp_coherence, power_curve
 from cycling_coach.twin.load_service import daily_load_and_intensity, smoothed_cp_states
 
 _STATIC = Path(__file__).parent / "static"
@@ -118,6 +119,13 @@ class ChatIn(BaseModel):
     message: str
 
 
+class GoalIn(BaseModel):
+    name: str | None = None
+    date: str                       # ISO YYYY-MM-DD
+    kind: str | None = None
+    priority: str = "A"
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Vikon", docs_url="/api/docs", lifespan=_lifespan)
     chat_state: dict[str, ChatSession] = {}     # una conversación (single-user local)
@@ -197,6 +205,72 @@ def create_app() -> FastAPI:
                  "predicted": round(c.predicted), "ratio": c.ratio, "exceeds": c.exceeds}
                 for c in r.checks
             ],
+        }
+
+    @app.get("/api/power-curve")
+    def power_curve_ep(session: DB, days: int = 120) -> dict[str, Any]:
+        aid = _athlete_id(session)
+        pc = power_curve(session, aid, date.today(), days=days)
+        if pc is None:
+            raise HTTPException(404, "Sin potencia reciente.")
+        return pc
+
+    @app.get("/api/settings")
+    def settings_ep(session: DB) -> dict[str, Any]:
+        aid = _athlete_id(session)
+        cfg = get_settings()
+        facts = gather_facts(session, aid, date.today())
+        n_act = session.execute(
+            select(func.count()).select_from(Activity).where(Activity.athlete_id == aid)
+        ).scalar_one()
+        last = session.execute(
+            select(func.max(Activity.start_time)).where(Activity.athlete_id == aid)
+        ).scalar_one_or_none()
+        goal = next_goal(session, aid, date.today())
+        return {
+            "ftp": facts.ftp,
+            "cp": facts.cp,
+            "w_prime": facts.w_prime,
+            "activities": n_act,
+            "last_activity": last.date().isoformat() if last else None,
+            "goal": (
+                {
+                    "name": goal.name,
+                    "date": goal.event_date.isoformat(),
+                    "priority": goal.priority,
+                    "days_to": (goal.event_date - date.today()).days,
+                }
+                if goal
+                else None
+            ),
+            "llm": {
+                "configured": cfg.llm_configured,
+                "model": cfg.llm_model,
+                "base_url": cfg.llm_base_url,
+            },
+        }
+
+    @app.post("/api/goal")
+    def set_goal_ep(body: GoalIn, session: DB) -> dict[str, Any]:
+        aid = _athlete_id(session)
+        try:
+            event = date.fromisoformat(body.date)
+        except ValueError as exc:
+            raise HTTPException(422, "Fecha inválida (usa AAAA-MM-DD).") from exc
+        add_goal(session, aid, event, name=body.name, kind=body.kind, priority=body.priority)
+        return {"ok": True, "days_to": (event - date.today()).days}
+
+    @app.post("/api/sync")
+    def sync_full() -> dict[str, Any]:
+        """Sincronización manual COMPLETA (con streams) — botón de Ajustes."""
+        try:
+            r = sync_recent(fetch_streams=True)
+        except SyncError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        return {
+            "new": r.activities_ingested,
+            "streams": r.streams_ingested,
+            "skipped": r.skipped_existing,
         }
 
     @app.post("/api/refresh")

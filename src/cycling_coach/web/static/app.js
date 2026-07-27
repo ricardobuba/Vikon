@@ -3,32 +3,124 @@ const $ = (s) => document.querySelector(s);
 const api = (p, opts) => fetch(p, opts).then((r) => r.ok ? r.json() : r.json().then((e) => Promise.reject(e)));
 const fmt = (v, d = 0) => (v == null ? "—" : Number(v).toFixed(d));
 const signed = (v) => (v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(0));
+const shortDate = (iso) => new Date(iso).toLocaleDateString("es-ES", { day: "numeric", month: "short" });
 
-// --- Gráfica SVG de líneas (sin dependencias) -------------------------------
-function sparkPath(vals, w, h, min, max) {
-  if (vals.length < 2) return "";
-  const dx = w / (vals.length - 1), sp = max - min || 1;
-  return vals.map((v, i) => `${i ? "L" : "M"}${(i * dx).toFixed(1)} ${(h - (v - min) / sp * h).toFixed(1)}`).join(" ");
+// --- Utilidades de gráficas SVG (sin dependencias) --------------------------
+// Marcas "redondas" para un eje entre min y max (0, 50, 100…).
+function niceTicks(min, max, count = 4) {
+  const span = (max - min) || 1;
+  const raw = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const ticks = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) ticks.push(v);
+  return ticks;
 }
-function multiLine(series, { w = 320, h = 130, height = 130, zeroLine = false } = {}) {
+
+// Gráfica de líneas con EJES ETIQUETADOS. series: [{vals,color,fill,dash}].
+// opts: {h, zeroLine, yfmt, xlabels:[{i,text}], ylabel}
+function chart(series, opts = {}) {
+  const W = 340, H = opts.h || 168;
+  const mL = 38, mR = 10, mT = 10, mB = 22;
+  const iw = W - mL - mR, ih = H - mT - mB;
   const all = series.flatMap((s) => s.vals).filter((v) => v != null);
-  if (!all.length) return `<div class="sub">sin datos</div>`;
+  if (all.length < 2) return `<div class="sub">sin datos suficientes</div>`;
   let min = Math.min(...all), max = Math.max(...all);
   if (min === max) { min -= 1; max += 1; }
   const pad = (max - min) * 0.12; min -= pad; max += pad;
-  let extra = "";
-  if (zeroLine && min < 0 && max > 0) {
-    const zy = (h - (0 - min) / (max - min) * h).toFixed(1);
-    extra = `<line x1="0" y1="${zy}" x2="${w}" y2="${zy}" stroke="#ffffff22" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>`;
-  }
-  const paths = series.map((s) => {
-    const d = sparkPath(s.vals, w, h, min, max);
-    const area = s.fill ? `<path d="${d} L${w} ${h} L0 ${h} Z" fill="${s.color}" opacity="0.10"/>` : "";
-    return `${area}<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+  const n = Math.max(...series.map((s) => s.vals.length));
+  const X = (i) => mL + (n <= 1 ? iw / 2 : i / (n - 1) * iw);
+  const Y = (v) => mT + (1 - (v - min) / (max - min)) * ih;
+  const yfmt = opts.yfmt || ((v) => Math.round(v));
+
+  // rejilla + etiquetas del eje Y
+  let grid = niceTicks(min, max, 4).map((v) => {
+    const y = Y(v).toFixed(1);
+    return `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="#ffffff10"/>`
+      + `<text x="${mL - 5}" y="${(+y + 3).toFixed(1)}" fill="var(--muted)" font-size="9" text-anchor="end">${yfmt(v)}</text>`;
   }).join("");
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:${height}px">${extra}${paths}</svg>`;
+  if (opts.zeroLine && min < 0 && max > 0) {
+    const zy = Y(0).toFixed(1);
+    grid += `<line x1="${mL}" y1="${zy}" x2="${W - mR}" y2="${zy}" stroke="#ffffff40" stroke-dasharray="3 3"/>`;
+  }
+
+  const paths = series.map((s) => {
+    const pts = s.vals.map((v, i) => v == null ? null : `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).filter(Boolean);
+    if (pts.length < 2) return "";
+    const d = "M" + pts.join(" L");
+    const base = (mT + ih).toFixed(1);
+    const area = s.fill ? `<path d="${d} L${X(s.vals.length - 1).toFixed(1)},${base} L${X(0).toFixed(1)},${base} Z" fill="${s.color}" opacity="0.10"/>` : "";
+    const dash = s.dash ? `stroke-dasharray="4 3"` : "";
+    return `${area}<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" ${dash}/>`;
+  }).join("");
+
+  const xlab = (opts.xlabels || []).map((t) =>
+    `<text x="${X(t.i).toFixed(1)}" y="${H - 6}" fill="var(--muted)" font-size="9" text-anchor="middle">${t.text}</text>`
+  ).join("");
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${paths}${xlab}</svg>`;
 }
-const legend = (items) => `<div class="legend">${items.map((i) => `<span><i class="dot" style="background:${i.color}"></i>${i.label}</span>`).join("")}</div>`;
+
+// Tres marcas de fecha (inicio · medio · fin) para una serie diaria. Si la serie
+// abarca varios años (p. ej. la evolución del FTP), muestra el año para no
+// confundir (ordena por fecha real, no por día/mes suelto).
+function dateTicks(days) {
+  const n = days.length;
+  if (!n) return [];
+  const spanYears = new Date(days[0]).getFullYear() !== new Date(days[n - 1]).getFullYear();
+  const label = (iso) => spanYears
+    ? new Date(iso).toLocaleDateString("es-ES", { month: "short", year: "2-digit" })
+    : shortDate(iso);
+  return [0, Math.floor(n / 2), n - 1].map((i) => ({ i, text: label(days[i]) }));
+}
+
+const legend = (items) => `<div class="legend">${items.map((i) =>
+  `<span><i class="dot" style="background:${i.color}"></i>${i.label}</span>`).join("")}</div>`;
+
+// Curva de potencia: eje X logarítmico (5 s → 1 h), real vs modelo CP/W'.
+function powerChart(points, cp) {
+  const W = 340, H = 196;
+  const mL = 40, mR = 12, mT = 10, mB = 28;
+  const iw = W - mL - mR, ih = H - mT - mB;
+  const lx = (s) => Math.log10(s);
+  const secs = points.map((p) => p.seconds);
+  const xmin = lx(Math.min(...secs)), xmax = lx(Math.max(...secs));
+  const X = (s) => mL + (lx(s) - xmin) / (xmax - xmin) * iw;
+  const yv = points.flatMap((p) => [p.actual, p.predicted]).filter((v) => v != null);
+  if (!yv.length) return `<div class="sub">sin datos</div>`;
+  const ymax = Math.max(...yv) * 1.05;
+  const Y = (v) => mT + (1 - v / ymax) * ih;
+
+  let grid = niceTicks(0, ymax, 4).map((v) => {
+    const y = Y(v).toFixed(1);
+    return `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="#ffffff10"/>`
+      + `<text x="${mL - 5}" y="${(+y + 3).toFixed(1)}" fill="var(--muted)" font-size="9" text-anchor="end">${Math.round(v)}</text>`;
+  }).join("");
+  // línea del CP (asíntota aeróbica)
+  if (cp) {
+    const y = Y(cp).toFixed(1);
+    grid += `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="#00D1B2" stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>`
+      + `<text x="${W - mR}" y="${(+y - 4).toFixed(1)}" fill="#00D1B2" font-size="9" text-anchor="end">CP ${Math.round(cp)}W</text>`;
+  }
+
+  const ticksX = [[5, "5s"], [30, "30s"], [60, "1m"], [300, "5m"], [1200, "20m"], [3600, "1h"]];
+  const xlab = ticksX.filter(([s]) => s >= Math.min(...secs) && s <= Math.max(...secs)).map(([s, t]) =>
+    `<line x1="${X(s).toFixed(1)}" y1="${mT}" x2="${X(s).toFixed(1)}" y2="${mT + ih}" stroke="#ffffff08"/>`
+    + `<text x="${X(s).toFixed(1)}" y="${H - 8}" fill="var(--muted)" font-size="9" text-anchor="middle">${t}</text>`
+  ).join("");
+
+  const line = (key, color, dash) => {
+    const pts = points.filter((p) => p[key] != null).map((p) => `${X(p.seconds).toFixed(1)},${Y(p[key]).toFixed(1)}`);
+    if (pts.length < 2) return "";
+    return `<path d="M${pts.join(" L")}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" ${dash ? 'stroke-dasharray="5 3"' : ""}/>`;
+  };
+  const dots = points.filter((p) => p.actual != null).map((p) =>
+    `<circle cx="${X(p.seconds).toFixed(1)}" cy="${Y(p.actual).toFixed(1)}" r="2.6" fill="#2BC4FF"/>`).join("");
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${xlab}`
+    + `${line("predicted", "#2E7DFF", true)}${line("actual", "#2BC4FF", false)}${dots}</svg>`;
+}
 
 // --- Pantalla HOY -----------------------------------------------------------
 function renderHome(s) {
@@ -68,10 +160,10 @@ function renderHome(s) {
   // gráfica de forma (async)
   api("/api/trend?days=90").then((t) => {
     if (!t.length) { $("#form-svg").innerHTML = `<div class="sub">sin datos</div>`; return; }
-    $("#form-svg").outerHTML = multiLine([
+    $("#form-svg").outerHTML = chart([
       { vals: t.map((d) => d.ctl), color: "#2BC4FF", fill: true },
       { vals: t.map((d) => d.tsb), color: "#2E7DFF" },
-    ], { zeroLine: true }) + legend([
+    ], { zeroLine: true, xlabels: dateTicks(t.map((d) => d.day)) }) + legend([
       { color: "#2BC4FF", label: "Fitness (CTL)" }, { color: "#2E7DFF", label: "Forma (TSB)" },
     ]);
   }).catch(() => { $("#form-svg").innerHTML = `<div class="sub">—</div>`; });
@@ -81,9 +173,9 @@ function renderHome(s) {
 async function renderProgress() {
   const box = $("#progress-content");
   box.innerHTML = `<div class="loading">Cargando progreso…</div>`;
-  const [ftp, coh] = await Promise.all([
+  const [ftp, pc] = await Promise.all([
     api("/api/ftp").catch(() => []),
-    api("/api/coherence").catch(() => null),
+    api("/api/power-curve").catch(() => null),
   ]);
   let html = "";
   // Evolución FTP / CP
@@ -91,27 +183,19 @@ async function renderProgress() {
     const cur = ftp[ftp.length - 1];
     html += `<div class="card"><h3>Evolución de tu motor</h3>
       <div class="sub">FTP ${cur.ftp} W · CP ${cur.cp} W</div>
-      ${multiLine([
+      ${chart([
         { vals: ftp.map((d) => d.ftp), color: "#2E7DFF", fill: true },
         { vals: ftp.map((d) => d.cp), color: "#2BC4FF" },
-      ], { height: 150 })}
+      ], { h: 150, yfmt: (v) => Math.round(v) + "W", xlabels: dateTicks(ftp.map((d) => d.day)) })}
       ${legend([{ color: "#2E7DFF", label: "FTP" }, { color: "#2BC4FF", label: "CP" }])}</div>`;
   }
-  // Curva de potencia + coherencia del CP
-  if (coh) {
-    const maxv = Math.max(...coh.checks.map((c) => Math.max(c.actual || 0, c.predicted)));
-    const bars = coh.checks.filter((c) => c.seconds >= 60).map((c) => {
-      const dur = c.seconds >= 60 ? `${c.seconds / 60}min` : `${c.seconds}s`;
-      const wpct = ((c.actual || 0) / maxv * 100).toFixed(0);
-      return `<div class="pcbar ${c.exceeds ? "exceed" : ""}">
-        <span class="lbl">${dur}</span>
-        <span class="track"><span class="fill" style="width:${wpct}%"></span></span>
-        <span class="val">${c.actual ? Math.round(c.actual) : "—"}</span></div>`;
-    }).join("");
+  // Curva de potencia (real vs modelo) + coherencia del CP
+  if (pc) {
     html += `<div class="card"><h3>Curva de potencia</h3>
-      <div class="sub">Tu mejor real (120 d) vs modelo · CP ${Math.round(coh.cp)} W</div>
-      ${bars}
-      <div class="verdict ${coh.coherent ? "ok" : "warn"}">${coh.verdict}</div></div>`;
+      <div class="sub">Tu mejor real (120 d) vs modelo CP/W'</div>
+      ${powerChart(pc.points, pc.cp)}
+      ${legend([{ color: "#2BC4FF", label: "Real (potencia máx.)" }, { color: "#2E7DFF", label: "Modelo CP/W'" }])}
+      ${pc.verdict ? `<div class="verdict ${pc.coherent ? "ok" : "warn"}">${pc.verdict}</div>` : ""}</div>`;
   }
   box.innerHTML = html || `<div class="loading">Sin datos de potencia todavía.</div>`;
 }
@@ -126,6 +210,86 @@ function renderHorizon(days) {
       <span class="t">TSB ${signed(h.tsb)}<br>${h.tss} TSS</span>
       <span class="bar" style="opacity:${0.3 + Math.min(h.tss, 120) / 120 * 0.7}"></span></div>`;
   }).join("");
+}
+
+// --- Pantalla AJUSTES -------------------------------------------------------
+async function renderSettings() {
+  const box = $("#settings-content");
+  box.innerHTML = `<div class="loading">Cargando ajustes…</div>`;
+  let s;
+  try { s = await api("/api/settings"); }
+  catch (e) { box.innerHTML = `<div class="loading">${e.detail || "Error cargando ajustes."}</div>`; return; }
+
+  const wp = s.w_prime != null ? (s.w_prime / 1000).toFixed(1) + " kJ" : "—";
+  const goal = s.goal
+    ? `<div class="setrow"><span>${s.goal.name || "Evento"}</span><span class="v">${shortDate(s.goal.date)} · faltan ${s.goal.days_to} d</span></div>`
+    : `<div class="sub">Sin objetivo. Añade uno para activar la periodización (fase/taper).</div>`;
+  const llmHost = (() => { try { return new URL(s.llm.base_url).host; } catch { return s.llm.base_url; } })();
+
+  box.innerHTML = `
+    <div class="card"><h3>Tu motor</h3>
+      <div class="setrow"><span>FTP</span><span class="v">${fmt(s.ftp)} W</span></div>
+      <div class="setrow"><span>CP (potencia crítica)</span><span class="v">${fmt(s.cp)} W</span></div>
+      <div class="setrow"><span>W′ (reserva anaeróbica)</span><span class="v">${wp}</span></div>
+      <div class="sub" style="margin-top:8px">Se recalcula con <code>cc estimate-cp</code> tras un test o esfuerzo máximo.</div>
+    </div>
+
+    <div class="card"><h3>Objetivo</h3>
+      ${goal}
+      <div class="goalform">
+        <input id="goal-name" placeholder="Nombre (p. ej. Gran Fondo)" autocomplete="off" />
+        <input id="goal-date" type="date" />
+        <select id="goal-prio"><option value="A">A · principal</option><option value="B">B</option><option value="C">C</option></select>
+        <button id="goal-save">Guardar objetivo</button>
+      </div>
+      <div id="goal-msg" class="sub"></div>
+    </div>
+
+    <div class="card"><h3>Datos</h3>
+      <div class="setrow"><span>Actividades importadas</span><span class="v">${s.activities}</span></div>
+      <div class="setrow"><span>Última actividad</span><span class="v">${s.last_activity ? shortDate(s.last_activity) : "—"}</span></div>
+      <div class="sub" style="margin:8px 0">Los entrenamientos entran solos desde Strava. Puedes forzar una sincronización ahora:</div>
+      <button id="sync-now" class="btn-full">↻ Sincronizar con Strava</button>
+      <div id="sync-msg" class="sub"></div>
+    </div>
+
+    <div class="card"><h3>Vikon IA</h3>
+      <div class="setrow"><span>Estado</span><span class="v">${s.llm.configured ? "✅ conectada" : "⚠️ sin clave"}</span></div>
+      <div class="setrow"><span>Modelo</span><span class="v">${s.llm.model}</span></div>
+      <div class="setrow"><span>Proveedor</span><span class="v">${llmHost}</span></div>
+      ${s.llm.configured ? "" : `<div class="sub" style="margin-top:8px">Añade tu clave en el archivo <code>.env</code> para activar el chat.</div>`}
+    </div>
+
+    <div class="card"><h3>Acerca de</h3>
+      <div class="sub">Vikon · entrenador de ciclismo con gemelo digital. El motor decide; la IA explica.</div>
+    </div>`;
+
+  $("#goal-save").addEventListener("click", async () => {
+    const date = $("#goal-date").value;
+    if (!date) { $("#goal-msg").textContent = "Elige una fecha."; return; }
+    try {
+      const r = await api("/api/goal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: $("#goal-name").value || null, date, priority: $("#goal-prio").value }),
+      });
+      $("#goal-msg").textContent = `✓ Objetivo guardado (faltan ${r.days_to} días).`;
+      loadHome(); horizonLoaded = false;
+      renderSettings();
+    } catch (e) { $("#goal-msg").textContent = e.detail || "No se pudo guardar."; }
+  });
+
+  $("#sync-now").addEventListener("click", async (ev) => {
+    const btn = ev.currentTarget; btn.disabled = true;
+    $("#sync-msg").textContent = "Sincronizando con Strava…";
+    try {
+      const r = await api("/api/sync", { method: "POST" });
+      $("#sync-msg").textContent = r.new > 0
+        ? `✓ ${r.new} nueva(s) actividad(es) importada(s).`
+        : "✓ Ya estaba todo al día.";
+      if (r.new > 0) { loadHome(); horizonLoaded = false; renderSettings(); }
+    } catch (e) { $("#sync-msg").textContent = e.detail || "No se pudo sincronizar (¿credenciales de Strava?)."; }
+    finally { btn.disabled = false; }
+  });
 }
 
 // --- Chat -------------------------------------------------------------------
@@ -158,7 +322,7 @@ async function sendChat() {
 
 // --- Navegación -------------------------------------------------------------
 function show(view) {
-  ["home", "progress", "horizon", "chat"].forEach((v) => { $(`#${v}-view`).style.display = v === view ? "block" : "none"; });
+  ["home", "progress", "horizon", "chat", "settings"].forEach((v) => { $(`#${v}-view`).style.display = v === view ? "block" : "none"; });
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   const isChat = view === "chat";
   $("#chat-input").style.display = isChat ? "flex" : "none";
@@ -166,6 +330,7 @@ function show(view) {
   if (isChat) $("#chat-text").focus();
   if (view === "horizon") loadHorizon();
   if (view === "progress") renderProgress();
+  if (view === "settings") renderSettings();
 }
 
 let horizonLoaded = false;
