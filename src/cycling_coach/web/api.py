@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from cycling_coach.assistant.assistant import ChatSession
-from cycling_coach.assistant.grounding import Facts, gather_facts
+from cycling_coach.assistant.grounding import Facts, gather_facts, planning_date
 from cycling_coach.assistant.llm import LLMClient, LLMError
 from cycling_coach.db.engine import session_scope
 from cycling_coach.db.models import Athlete
@@ -71,6 +71,9 @@ def _facts_json(f: Facts) -> dict[str, Any]:
         "goal_date": f.goal_date.isoformat() if f.goal_date else None,
         "days_to_event": f.days_to_event,
         "phase": f.phase,
+        "trained_today": f.trained_today,
+        "trained_minutes": f.trained_minutes,
+        "plan_date": f.plan_date.isoformat() if f.plan_date else None,
         "plan": _plan_json(f.plan),
     }
 
@@ -92,6 +95,7 @@ def create_app() -> FastAPI:
     @app.get("/api/horizon")
     def horizon(session: DB, days: int = 7) -> list[dict[str, Any]]:
         aid = _athlete_id(session)
+        start, _ = planning_date(session, aid, date.today())   # si entrenó hoy, desde mañana
         return [
             {
                 "day": h.day.isoformat(),
@@ -103,7 +107,7 @@ def create_app() -> FastAPI:
                 "minutes": round(h.plan.template.total_minutes()),
                 "tss": round(h.tss),
             }
-            for h in plan_horizon(session, aid, date.today(), days=days)
+            for h in plan_horizon(session, aid, start, days=days)
         ]
 
     @app.get("/api/coherence")
@@ -127,7 +131,7 @@ def create_app() -> FastAPI:
         """Sincroniza las actividades nuevas de Strava (incremental). La llama la
         app al abrir → el plan refleja la salida de hoy sin backfill manual."""
         try:
-            r = sync_recent(fetch_streams=True)
+            r = sync_recent(fetch_streams=False)   # rápido al abrir; streams en backfill/sync
         except SyncError as exc:
             raise HTTPException(503, str(exc)) from exc
         return {

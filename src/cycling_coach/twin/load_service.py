@@ -13,9 +13,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from cycling_coach.db.models import Athlete
+from cycling_coach.db.models import Activity, Athlete, Stream
 from cycling_coach.db.repositories import (
     estimate_hr_bounds,
     latest_parameter_estimate,
@@ -50,14 +51,44 @@ class LoadResult:
     ftp: float
 
 
-def ftp_trajectory(session: Session, athlete_id: int) -> list[tuple[date, float]]:
-    """FTP(t) desde la trayectoria CP suavizada: [(fecha, ftp)] ordenada."""
+# --- Caché del suavizador de CP (lo más caro del pipeline) -------------------
+# El suavizador (Kalman sobre 1000+ actividades, ~1.5s) solo cambia si cambian
+# las actividades con potencia. Lo memorizamos por atleta con una firma barata
+# (nº y último id) para que TODAS las capas (FTP, CTL, CRI, plan) lo reusen en
+# vez de recomputarlo 3-4 veces por petición. Se invalida solo al sincronizar.
+_SMOOTH_CACHE: dict[int, tuple[tuple[int, int], list]] = {}
+
+
+def _power_signature(session: Session, athlete_id: int) -> tuple[int, int]:
+    row = session.execute(
+        select(func.count(Activity.id), func.coalesce(func.max(Activity.id), 0))
+        .join(Stream, Stream.activity_id == Activity.id)
+        .where(
+            Activity.athlete_id == athlete_id,
+            Activity.device_watts.is_(True),
+            Stream.stream_type == "watts",
+        )
+    ).one()
+    return (int(row[0]), int(row[1]))
+
+
+def smoothed_cp_states(session: Session, athlete_id: int) -> list:
+    """Trayectoria CP suavizada (estados con .as_of/.ftp_w/.cp), cacheada por
+    firma de datos. Es la única fuente del suavizador para todo el pipeline."""
+    sig = _power_signature(session, athlete_id)
+    hit = _SMOOTH_CACHE.get(athlete_id)
+    if hit is not None and hit[0] == sig:
+        return hit[1]
     activities = load_power_activities(session, athlete_id)
     obs = build_cp_observations([(st, aid, d) for st, aid, d in activities])
-    if not obs:
-        return []
-    cfg = resolve_config(session, athlete_id, None)
-    return sorted((s.as_of.date(), s.ftp_w) for s in run_cp_smoother(obs, cfg))
+    states = run_cp_smoother(obs, resolve_config(session, athlete_id, None)) if obs else []
+    _SMOOTH_CACHE[athlete_id] = (sig, states)
+    return states
+
+
+def ftp_trajectory(session: Session, athlete_id: int) -> list[tuple[date, float]]:
+    """FTP(t) desde la trayectoria CP suavizada: [(fecha, ftp)] ordenada."""
+    return sorted((s.as_of.date(), s.ftp_w) for s in smoothed_cp_states(session, athlete_id))
 
 
 def _ftp_asof(traj: list[tuple[date, float]], day: date, fallback: float) -> float:

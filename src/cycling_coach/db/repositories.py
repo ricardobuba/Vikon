@@ -382,6 +382,22 @@ def list_goals(session: Session, athlete_id: int) -> list[Goal]:
     )
 
 
+def training_seconds_on(session: Session, athlete_id: int, day: date) -> int:
+    """Segundos de entrenamiento (moving, o elapsed en su defecto) de ese día.
+    Sirve para saber si el atleta YA ha entrenado hoy."""
+    total = session.execute(
+        select(
+            func.coalesce(
+                func.sum(func.coalesce(Activity.moving_time_s, Activity.elapsed_time_s)), 0
+            )
+        ).where(
+            Activity.athlete_id == athlete_id,
+            func.date(Activity.start_time) == day,
+        )
+    ).scalar_one()
+    return int(total or 0)
+
+
 def activity_exists(session: Session, provider: str, provider_activity_id: str) -> bool:
     return session.execute(
         select(Activity.id).where(

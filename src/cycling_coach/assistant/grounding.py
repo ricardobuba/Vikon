@@ -7,13 +7,16 @@ aquí, el asistente no puede afirmarlo. Se construye con el motor determinista.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
-from cycling_coach.db.repositories import latest_parameter_estimate, next_goal
-from cycling_coach.planner.planner import PlannedSession, phase_for
-from cycling_coach.planner.service import plan_today
+from cycling_coach.db.repositories import (
+    latest_parameter_estimate,
+    next_goal,
+    training_seconds_on,
+)
+from cycling_coach.planner.planner import PlannedSession, phase_for, plan_session
 from cycling_coach.twin.cri_service import compute_cri_service
 from cycling_coach.twin.load_service import build_training_context
 
@@ -36,10 +39,18 @@ class Facts:
     days_to_event: int | None = None
     phase: str | None = None
     plan: PlannedSession | None = None
+    trained_today: bool = False          # ¿ya entrenó hoy?
+    trained_minutes: int = 0
+    plan_date: date | None = None        # día que planifica el plan (hoy o mañana)
 
     def to_prompt(self) -> str:
         """Serializa la ficha para el prompt (texto plano, claro y acotado)."""
         L: list[str] = [f"Fecha: {self.as_of.isoformat()}"]
+        if self.trained_today:
+            L.append(
+                f"YA HA ENTRENADO HOY ({self.trained_minutes} min). El plan de abajo "
+                f"es para MAÑANA ({self.plan_date.isoformat() if self.plan_date else '—'})."
+            )
         if self.ftp is not None:
             L.append(f"FTP: {self.ftp:.0f} W")
         if self.cp is not None:
@@ -83,6 +94,13 @@ class Facts:
         return "\n".join(L)
 
 
+def planning_date(session: Session, athlete_id: int, today: date) -> tuple[date, int]:
+    """Fecha que debe planificar el motor y minutos ya entrenados hoy. Si ya
+    entrenó ≥20 min, planifica MAÑANA (la sesión de hoy está hecha)."""
+    mins = training_seconds_on(session, athlete_id, today) // 60
+    return (today + timedelta(days=1) if mins >= 20 else today), mins
+
+
 def gather_facts(
     session: Session,
     athlete_id: int,
@@ -98,25 +116,37 @@ def gather_facts(
     facts.cp = latest_parameter_estimate(session, athlete_id, "cp")
     facts.w_prime = latest_parameter_estimate(session, athlete_id, "w_prime")
 
-    current, _ = build_training_context(session, athlete_id, as_of)
+    # Si ya ha entrenado hoy (≥20 min), la sesión de hoy está hecha → el plan
+    # es para MAÑANA (su estado matinal ya incluirá la carga de hoy).
+    plan_date, facts.trained_minutes = planning_date(session, athlete_id, as_of)
+    facts.trained_today = plan_date != as_of
+    facts.plan_date = plan_date
+
+    # UNA sola pasada de contexto (el suavizador de CP va cacheado). Antes se
+    # recomputaba aquí y otra vez dentro de plan_today → ~2x más lento.
+    current, ctx = build_training_context(session, athlete_id, plan_date)
     if current is not None:
         facts.tsb, facts.ctl, facts.atl = current.tsb, current.ctl, current.atl
 
-    cri_detail = compute_cri_service(session, athlete_id, as_of)
+    cri_detail = compute_cri_service(session, athlete_id, plan_date)
     if cri_detail is not None:
         facts.cri = cri_detail.result.cri
         facts.cri_coverage = cri_detail.result.coverage
         facts.cri_components = dict(cri_detail.result.components)
     facts.subjective_cri = cri_override      # None salvo que dijeras cómo te sientes
 
-    goal = next_goal(session, athlete_id, as_of)
+    goal = next_goal(session, athlete_id, plan_date)
     if goal is not None:
         facts.goal_date = goal.event_date
         facts.goal_name = goal.name or goal.kind
-        facts.days_to_event = (goal.event_date - as_of).days
+        facts.days_to_event = (goal.event_date - plan_date).days
         facts.phase = phase_for(facts.days_to_event).value
 
-    facts.plan = plan_today(
-        session, athlete_id, as_of, minutes=minutes, cri_override=cri_override
-    )
+    if facts.ftp and current is not None:
+        cri = cri_override if cri_override is not None else facts.cri
+        facts.plan = plan_session(
+            ftp=facts.ftp, tsb=current.tsb, ctl=current.ctl, atl=current.atl,
+            cri=cri, context=ctx, minutes=minutes,
+            phase=phase_for(facts.days_to_event), days_to_event=facts.days_to_event,
+        )
     return facts

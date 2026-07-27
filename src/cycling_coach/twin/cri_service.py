@@ -18,9 +18,7 @@ from cycling_coach.db.repositories import (
 from cycling_coach.metrics import mean_maximal_power
 from cycling_coach.metrics.cleaning import clean_power
 from cycling_coach.physiology import (
-    build_cp_observations,
     compute_ctl_atl_tsb,
-    run_cp_smoother,
 )
 from cycling_coach.physiology.cri import (
     CRICalibration,
@@ -32,8 +30,7 @@ from cycling_coach.physiology.cri import (
     norm_recovery,
     norm_trend,
 )
-from cycling_coach.twin.cp_estimation import resolve_config
-from cycling_coach.twin.load_service import daily_tss_series
+from cycling_coach.twin.load_service import daily_tss_series, smoothed_cp_states
 
 
 @dataclass
@@ -54,12 +51,9 @@ class _Context:
 
 
 def _build_context(session: Session, athlete_id: int, as_of: date) -> _Context | None:
-    activities = load_power_activities(session, athlete_id)
-    obs = build_cp_observations([(st, aid, d) for st, aid, d in activities])
-    if not obs:
+    traj = smoothed_cp_states(session, athlete_id)   # caché compartida (evita recomputar)
+    if not traj:
         return None
-    cfg = resolve_config(session, athlete_id, None)
-    traj = run_cp_smoother(obs, cfg)
     cps = np.array([s.cp.mean for s in traj])
     cp_at = sorted((s.as_of.date(), s.cp.mean) for s in traj)
 

@@ -13,6 +13,10 @@ function renderHome(s) {
   if (s.goal_date) {
     goal = `<div class="goal-pill">🎯 ${s.goal_name || "Evento"} · faltan ${s.days_to_event} d · fase ${s.phase}</div>`;
   }
+  const trained = s.trained_today
+    ? `<div class="goal-pill" style="background:rgba(0,209,178,.12);border-color:rgba(0,209,178,.4)">✅ Ya entrenaste hoy (${s.trained_minutes} min)</div>`
+    : "";
+  const planLabel = s.trained_today ? "Mañana" : "Plan de hoy";
   let planHtml = `<div class="loading">No hay plan. Falta el FTP.</div>`;
   if (p) {
     const adjust = p.aspired ? `<div class="badge-adjust">rebajado desde ${p.aspired}</div>` : "";
@@ -23,8 +27,9 @@ function renderHome(s) {
       return `<div class="block"><span>${label}</span><span class="w">${w}</span></div>`;
     }).join("");
     planHtml = `
+      ${trained}
       <div class="hero"><div class="hero-inner">
-        <div class="label">Plan de hoy</div>
+        <div class="label">${planLabel}</div>
         <div class="session">${p.session}</div>
         <div class="objective">${p.objective.replace("_", " ")} · <span class="duration">${p.minutes} min</span></div>
         ${adjust}
