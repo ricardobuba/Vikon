@@ -81,10 +81,6 @@ QUALITY_INTENSITY = 0.85
 # en fatiga extrema, se fuerza un día de calidad (≈1-2/semana, cadencia
 # polarizada estándar). No aplica en semana de carrera. Ajustable.
 QUALITY_SPACING_DAYS = 4
-# Escalado del estímulo de calidad garantizada: cuanto más tiempo sin intensidad,
-# más duro el estímulo (recupera el top-end del puncheur). En días sin calidad:
-QUALITY_THRESHOLD_AFTER = 6   # ≥6 d → umbral
-QUALITY_VO2_AFTER = 8         # ≥8 d → VO2máx
 
 
 @dataclass
@@ -121,6 +117,36 @@ class TrainingContext:
 
     def hard_days_last_week(self) -> int:
         return sum(1 for d in self.recent[-7:] if d.is_hard)
+
+
+# Menú de calidad por tipo de evento: una MEZCLA que rota (no un único objetivo).
+# Todos los eventos mantienen resistencia (los días aeróbicos) + FTP; el tipo solo
+# INCLINA las proporciones del trabajo de calidad. Es una heurística de reparto,
+# PROVISIONAL: la periodización fina por evento debe salir del RAG de literatura
+# científica (aún sin implementar) — ver [[backlog-ideas]].
+_EVENT_QUALITY_MENU: dict[str, list[Objective]] = {
+    # Contrarreloj: FTP el rey, pero con sweet spot y algo de VO2.
+    "crono": [Objective.threshold, Objective.sweet_spot, Objective.threshold, Objective.vo2max],
+    # Gran fondo: aeróbico/sweet spot dominante, umbral de vez en cuando.
+    "gran_fondo": [Objective.sweet_spot, Objective.threshold, Objective.sweet_spot],
+    # Criterium/ruta: mezcla completa (resistencia va en los días fáciles) —
+    # FTP + top-end repetido, sin renunciar al sweet spot.
+    "criterium": [Objective.threshold, Objective.vo2max, Objective.sweet_spot],
+    "ruta": [Objective.threshold, Objective.vo2max, Objective.sweet_spot],
+    "mtb": [Objective.threshold, Objective.vo2max, Objective.sweet_spot],
+}
+# Sin tipo de evento: variedad progresiva sweet spot → umbral → VO2.
+_DEFAULT_QUALITY_MENU = [Objective.sweet_spot, Objective.threshold, Objective.vo2max]
+
+
+def event_quality(kind: str | None, index: int) -> Objective:
+    """Objetivo de calidad del `index`-ésimo día de calidad, según el evento. Rota
+    por el menú del evento → variedad + énfasis sin excluir tipos de estímulo.
+
+    Sesgo por especialidad, NO verdad absoluta: la dosis la elige la simulación
+    con tu forma real, y la prescripción fina vendrá del RAG de literatura."""
+    menu = _EVENT_QUALITY_MENU.get(kind or "", _DEFAULT_QUALITY_MENU)
+    return menu[index % len(menu)]
 
 
 def days_since_quality(recent: list[RecentDay]) -> int:
@@ -356,6 +382,8 @@ def plan_session(
     minutes: float | None = None,
     phase: Phase = Phase.off,
     days_to_event: int | None = None,
+    event_kind: str | None = None,
+    quality_index: int = 0,
 ) -> PlannedSession:
     """Genera la sesión recomendada + explicación a partir del estado.
 
@@ -383,9 +411,9 @@ def plan_session(
 
     # Calidad garantizada: si hace demasiado que no metes intensidad y NO estás
     # en fatiga extrema ni recuperando de un día duro, fuerza un día de calidad
-    # para mantener el FTP/punch (rompe el "Z2 para siempre"). El estímulo ESCALA
-    # con los días sin intensidad: sweet spot → umbral → VO2máx (un puncheur no
-    # puede pasar semanas sin top-end). No en semana de carrera; respeta duro/fácil.
+    # para mantener el FTP/punch (rompe el "Z2 para siempre"). El TIPO de calidad
+    # lo marca el evento (rotando su menú → variedad + énfasis); la resistencia va
+    # en los días fáciles. No en semana de carrera; respeta duro/fácil.
     quality_note = None
     if (
         context is not None
@@ -397,16 +425,11 @@ def plan_session(
         and context.hard_days_last_week() < MAX_HARD_PER_WEEK
         and phase is not Phase.race
     ):
-        dsq = context.days_since_quality
-        if dsq >= QUALITY_VO2_AFTER:
-            objective = Objective.vo2max
-        elif dsq >= QUALITY_THRESHOLD_AFTER:
-            objective = Objective.threshold
-        else:
-            objective = Objective.sweet_spot
+        objective = event_quality(event_kind, quality_index)
+        ev = f", evento {event_kind}" if event_kind else ""
         quality_note = (
-            f"calidad garantizada: {context.days_since_quality} días sin intensidad "
-            f"→ {objective.value} para mantener el FTP/punch"
+            f"calidad garantizada: {context.days_since_quality} días sin intensidad"
+            f"{ev} → {objective.value.replace('_', ' ')}"
         )
 
     # Dosis: si conocemos el estado (CTL/ATL), SIMULAMOS cada variante y elegimos
@@ -539,6 +562,7 @@ def roll_horizon(
     days_to_event: int | None = None,
     minutes: float | None = None,
     daily_minutes: dict[int, int] | None = None,
+    event_kind: str | None = None,
 ) -> list[HorizonDay]:
     """Proyecta `days` días encadenando `plan_session` y ARRASTRANDO el estado
     simulado (CTL/ATL) y la historia (duro/fácil emergente). Voraz por diseño:
@@ -561,6 +585,7 @@ def roll_horizon(
     )
     since_long = 0        # días aeróbicos desde el último "día largo"
     endur_n = 0           # nº de días aeróbicos (para rotar corto/medio)
+    quality_n = 0         # nº de días de calidad (rota el menú del evento)
 
     out: list[HorizonDay] = []
     for i in range(days):
@@ -591,7 +616,10 @@ def roll_horizon(
             cri=(cri if i == 0 else None),          # CRI solo es fiable hoy
             context=day_ctx, minutes=md,
             phase=phase, days_to_event=dte,
+            event_kind=event_kind, quality_index=quality_n,
         )
+        if INTENSITY_RANK[plan.objective] >= INTENSITY_RANK[Objective.sweet_spot]:
+            quality_n += 1                          # avanza el menú del evento
 
         # (3) Variedad aeróbica en los días FUTUROS (el día 0 se compromete tal
         # cual): un día largo por semana; el resto, corto/medio alternando. Rompe

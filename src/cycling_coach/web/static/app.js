@@ -347,9 +347,13 @@ function renderHorizon(days) {
   const names = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
   $("#horizon-content").innerHTML = days.map((h, i) => {
     const d = i === 0 ? "HOY" : names[new Date(h.day).getDay()];
+    // Si la API no manda los bloques (servidor antiguo), lo decimos claro en vez
+    // de un "sin bloques" que parece un fallo del plan.
     const detail = (h.targets && h.targets.length)
       ? h.targets.map(blockHtml).join("")
-      : `<div class="empty">${h.objective === "rest" ? "Descanso — sin sesión." : "Sin bloques."}</div>`;
+      : `<div class="empty">${h.objective === "rest"
+          ? "Día de descanso — sin sesión."
+          : `${h.session} · ${h.minutes} min (reinicia el servidor para ver los bloques)`}</div>`;
     return `<div class="hitem">
       <div class="hrow"><span class="d">${d}</span>
         <span class="o">${h.objective.replace("_", " ")}<br><span style="color:var(--muted);font-size:12px">${h.session}</span></span>

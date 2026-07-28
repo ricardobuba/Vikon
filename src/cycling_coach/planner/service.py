@@ -64,7 +64,8 @@ def plan_today(
         cri_detail = compute_cri_service(session, athlete_id, as_of)
         cri = cri_detail.result.cri if cri_detail else None
 
-    # Horizonte: si hay un evento futuro, su cercanía define la fase (grieta 5).
+    # Horizonte: si hay un evento futuro, su cercanía define la fase (grieta 5) y
+    # su TIPO sesga el énfasis de la calidad (crono→FTP, gran fondo→aeróbico...).
     goal = next_goal(session, athlete_id, as_of)
     days_to_event = (goal.event_date - as_of).days if goal else None
     phase = phase_for(days_to_event)
@@ -72,6 +73,7 @@ def plan_today(
     return plan_session(
         ftp=ftp, tsb=tsb, ctl=ctl, atl=atl, cri=cri, context=ctx,
         minutes=minutes, phase=phase, days_to_event=days_to_event,
+        event_kind=goal.kind if goal else None,
     )
 
 
@@ -103,5 +105,5 @@ def plan_horizon(
     return roll_horizon(
         ftp=ftp, ctl=current.ctl, atl=current.atl, context=ctx, cri=cri,
         days=days, start=as_of, days_to_event=days_to_event, minutes=minutes,
-        daily_minutes=avail or None,
+        daily_minutes=avail or None, event_kind=goal.kind if goal else None,
     )

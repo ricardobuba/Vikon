@@ -339,3 +339,43 @@ def test_horizon_tapers_toward_event():
     )
     assert sum(d.tss for d in near) < sum(d.tss for d in far)
     assert near[-1].phase in (Phase.race, Phase.taper)
+
+
+# --- El TIPO de evento adapta el énfasis de la calidad -----------------------
+def test_event_quality_menu_rotates_and_differs_by_event():
+    from cycling_coach.planner.planner import event_quality
+
+    # Cada evento rota su propio menú (variedad, no un único estímulo).
+    crit = [event_quality("criterium", i) for i in range(3)]
+    crono = [event_quality("crono", i) for i in range(3)]
+    fondo = [event_quality("gran_fondo", i) for i in range(3)]
+    assert len(set(crit)) > 1 and len(set(crono)) > 1     # hay mezcla
+    assert Objective.vo2max in crit                       # criterium pide top-end
+    assert crono.count(Objective.threshold) >= 2          # crono manda FTP
+    assert Objective.vo2max not in fondo                  # gran fondo, sin top-end
+    # Rota (índice cíclico), no se queda clavado.
+    assert event_quality("criterium", 0) is event_quality("criterium", 3)
+
+
+def test_horizon_emphasis_depends_on_event_kind():
+    # Atleta con algo de fatiga (la forma pide base) → los días de calidad los
+    # decide la "calidad garantizada", y ahí manda el TIPO de evento.
+    ctx = TrainingContext(
+        recent=[], fitness_pct=0.7, tsb_history=[],
+        ctl_window=[50.0] * 8, days_since_quality=5,
+    )
+
+    def objectives(kind):
+        return [
+            d.plan.objective for d in roll_horizon(
+                ftp=348.0, ctl=50.0, atl=65.0, context=ctx,
+                days=10, start=date(2026, 7, 26), event_kind=kind,
+            )
+        ]
+
+    crit, fondo = objectives("criterium"), objectives("gran_fondo")
+    assert crit != fondo                                   # el evento importa
+    assert Objective.vo2max in crit                        # criterium: top-end
+    assert Objective.vo2max not in fondo                   # gran fondo: sin VO2
+    # Todos conservan la base aeróbica (la resistencia no se sacrifica).
+    assert Objective.endurance in crit and Objective.endurance in fondo

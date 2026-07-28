@@ -44,6 +44,7 @@ class Facts:
     subjective_cri: float | None = None      # disposición que dijiste (usada en el plan)
     goal_date: date | None = None
     goal_name: str | None = None
+    goal_kind: str | None = None         # crono|gran_fondo|criterium|ruta|mtb
     days_to_event: int | None = None
     phase: str | None = None
     plan: PlannedSession | None = None
@@ -184,9 +185,11 @@ def gather_facts(
     facts.subjective_cri = cri_override      # None salvo que dijeras cómo te sientes
 
     goal = next_goal(session, athlete_id, plan_date)
+    event_kind = goal.kind if goal is not None else None
     if goal is not None:
         facts.goal_date = goal.event_date
         facts.goal_name = goal.name or goal.kind
+        facts.goal_kind = goal.kind
         facts.days_to_event = (goal.event_date - plan_date).days
         facts.phase = phase_for(facts.days_to_event).value
 
@@ -206,6 +209,7 @@ def gather_facts(
                 ftp=facts.ftp, tsb=current.tsb, ctl=current.ctl, atl=current.atl,
                 cri=cri, context=ctx, minutes=day_min,
                 phase=phase_for(facts.days_to_event), days_to_event=facts.days_to_event,
+                event_kind=event_kind,
             )
         # Horizonte de la semana para que el chat conozca el plan futuro.
         facts.horizon = [] if not with_horizon else [
@@ -220,7 +224,7 @@ def gather_facts(
                 ftp=facts.ftp, ctl=current.ctl, atl=current.atl, context=ctx,
                 cri=cri, days=7, start=plan_date,
                 days_to_event=facts.days_to_event, minutes=minutes,
-                daily_minutes=avail or None,
+                daily_minutes=avail or None, event_kind=event_kind,
             )
         ]
     return facts
