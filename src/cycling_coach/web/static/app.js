@@ -5,6 +5,46 @@ const fmt = (v, d = 0) => (v == null ? "—" : Number(v).toFixed(d));
 const signed = (v) => (v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(0));
 const shortDate = (iso) => new Date(iso).toLocaleDateString("es-ES", { day: "numeric", month: "short" });
 
+// --- Iconos SVG minimalistas (línea, heredan el color del texto) -------------
+const ICON = {
+  home: '<path d="M3 10.8 12 3.5l9 7.3"/><path d="M5.5 9.5V20h13V9.5"/>',
+  chart: '<path d="M5 20V11M12 20V4.5M19 20v-6.5"/>',
+  calendar: '<rect x="4" y="5" width="16" height="15" rx="2.2"/><path d="M4 9.5h16M8.5 3v4M15.5 3v4"/>',
+  chat: '<path d="M20 14.5a2 2 0 0 1-2 2H8l-4 3.5V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/>',
+  settings: '<path d="M3.5 7.5h9M17 7.5h3.5M3.5 16.5h3M11 16.5h9.5"/><circle cx="14.5" cy="7.5" r="2.1"/><circle cx="7.5" cy="16.5" r="2.1"/>',
+  bike: '<circle cx="6" cy="16" r="3.3"/><circle cx="18" cy="16" r="3.3"/><path d="M6 16l4.2-7H14l3.6 7M9.5 9h5.2l-1.7 3.4"/>',
+  pulse: '<path d="M3 12h4l2.4 6 4-13 2.3 7H21"/>',
+  battery: '<rect x="3" y="8.5" width="15" height="8" rx="1.6"/><path d="M21 11v3"/><path d="M6.5 11v3"/>',
+  pencil: '<path d="M4 20l1-4L15.5 5.5 19 9 8 20z"/><path d="M13.5 7.5 17 11"/>',
+  target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.6"/><circle cx="12" cy="12" r="0.6" fill="currentColor" stroke="none"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7"/>',
+  refresh: '<path d="M4.5 11a7.5 7.5 0 0 1 12.7-4.2L20 9"/><path d="M20 4.2V9h-4.8"/><path d="M19.5 13a7.5 7.5 0 0 1-12.7 4.2L4 15"/><path d="M4 19.8V15h4.8"/>',
+  send: '<path d="M4.5 12 20 5l-6.5 15-2.6-6.2z"/><path d="M11 13.5 20 5"/>',
+  chevron: '<path d="M9 6l6 6-6 6"/>',
+  flame: '<path d="M12 3c1 3-2 4-2 7a2 2 0 0 0 4 0c2 2 3 3.5 3 6a5 5 0 0 1-10 0c0-3 2-4 3-6 .8 1 2 1.6 2 3"/>',
+};
+function icon(name, size = 20) {
+  return `<svg class="ic" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" `
+    + `stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICON[name] || ""}</svg>`;
+}
+
+// Tipos de evento objetivo (características que usa la planificación por fases).
+const EVENT_KINDS = [
+  ["", "Tipo de evento…"], ["gran_fondo", "Gran fondo"], ["ruta", "Carrera en ruta"],
+  ["crono", "Contrarreloj"], ["criterium", "Criterium"], ["mtb", "MTB / Maratón"], ["otro", "Otro"],
+];
+const kindOptions = (sel) => EVENT_KINDS.map(([v, l]) =>
+  `<option value="${v}"${v === sel ? " selected" : ""}>${l}</option>`).join("");
+function paintIcons() {
+  document.querySelectorAll("nav button").forEach((b) => {
+    const s = b.querySelector(".ico"); if (s) s.innerHTML = icon(b.dataset.icon, 21);
+  });
+  document.querySelectorAll("#quick button").forEach((b) => {
+    const s = b.querySelector(".ci"); if (s) s.innerHTML = icon(b.dataset.icon, 16);
+  });
+  const send = $("#chat-send"); if (send && !send.querySelector("svg")) send.innerHTML = icon("send", 20);
+}
+
 // --- Utilidades de gráficas SVG (sin dependencias) --------------------------
 // Marcas "redondas" para un eje entre min y max (0, 50, 100…).
 function niceTicks(min, max, count = 4) {
@@ -225,9 +265,13 @@ function renderHome(s) {
   const p = s.plan;
   const tsbClass = s.tsb == null ? "" : s.tsb >= 0 ? "pos" : "neg";
   let goal = "";
-  if (s.goal_date) goal = `<div class="goal-pill">🎯 ${s.goal_name || "Evento"} · faltan ${s.days_to_event} d · fase ${s.phase}</div>`;
+  if (s.goal_date) goal = `<div class="goal">
+    <span class="goal-ic">${icon("target", 20)}</span>
+    <div class="goal-txt"><b>${s.goal_name || "Evento"}</b><span>faltan ${s.days_to_event} días · fase ${s.phase}</span></div>
+    <span class="goal-days">${s.days_to_event}<i>días</i></span>
+  </div>`;
   const trained = s.trained_today
-    ? `<div class="goal-pill" style="background:rgba(0,209,178,.12);border-color:rgba(0,209,178,.4)">✅ Ya entrenaste hoy (${s.trained_minutes} min)</div>` : "";
+    ? `<div class="pill-ok"><span class="pill-ic">${icon("check", 18)}</span>Ya entrenaste hoy · ${s.trained_minutes} min</div>` : "";
   const planLabel = s.trained_today ? "Mañana" : "Plan de hoy";
   let planHtml = `<div class="loading">No hay plan. Falta el FTP.</div>`;
   if (p) {
@@ -277,14 +321,16 @@ async function renderProgress() {
     api("/api/power-curve").catch(() => null),
   ]);
   let html = "";
-  // Evolución FTP / CP (interactiva)
+  // Tu motor: número actual (FTP/CP) — sin gráfica.
   if (ftp.length) {
     const cur = ftp[ftp.length - 1];
-    html += `<div class="card"><h3>Evolución de tu motor</h3>
-      <div class="sub">FTP ${cur.ftp} W · CP ${cur.cp} W · toca la gráfica</div>
-      <div id="ftp-chart"></div></div>`;
+    html += `<div class="card"><h3>Tu motor</h3>
+      <div class="motor-row">
+        <div class="motor"><span class="mk">FTP</span><span class="mv">${cur.ftp}<i>W</i></span></div>
+        <div class="motor"><span class="mk">CP</span><span class="mv">${cur.cp}<i>W</i></span></div>
+      </div></div>`;
   }
-  // Curva de potencia (real vs modelo) + coherencia del CP
+  // Curva de potencia (real vs modelo, interactiva) + coherencia del CP
   if (pc) {
     html += `<div class="card"><h3>Curva de potencia</h3>
       <div class="sub">Tu mejor real (120 d) vs modelo CP/W' · toca la gráfica</div>
@@ -294,15 +340,6 @@ async function renderProgress() {
   }
   box.innerHTML = html || `<div class="loading">Sin datos de potencia todavía.</div>`;
   if (pc) mountPowerChart($("#pc-chart"), pc.points, pc.cp);
-  if (ftp.length) {
-    mountChart($("#ftp-chart"), {
-      dates: labelDates(ftp.map((d) => d.day)), yunit: "W",
-      series: [
-        { vals: ftp.map((d) => d.ftp), color: "#2E7DFF", name: "FTP", fill: true },
-        { vals: ftp.map((d) => d.cp), color: "#2BC4FF", name: "CP" },
-      ],
-    });
-  }
 }
 
 function renderHorizon(days) {
@@ -317,7 +354,7 @@ function renderHorizon(days) {
       <div class="hrow"><span class="d">${d}</span>
         <span class="o">${h.objective.replace("_", " ")}<br><span style="color:var(--muted);font-size:12px">${h.session}</span></span>
         <span class="t">TSB ${signed(h.tsb)}<br>${h.tss} TSS</span>
-        <span class="chev">▶</span></div>
+        <span class="chev">${icon("chevron", 14)}</span></div>
       <div class="hdetail" style="display:none">${detail}</div>
     </div>`;
   }).join("");
@@ -361,8 +398,9 @@ async function renderSettings() {
     <div class="card"><h3>Objetivo</h3>
       ${goal}
       <div class="goalform">
-        <input id="goal-name" placeholder="Nombre (p. ej. Gran Fondo)" autocomplete="off" />
+        <input id="goal-name" placeholder="Nombre (p. ej. Gran Fondo de León)" autocomplete="off" />
         <input id="goal-date" type="date" />
+        <select id="goal-kind">${kindOptions()}</select>
         <select id="goal-prio"><option value="A">A · principal</option><option value="B">B</option><option value="C">C</option></select>
         <button id="goal-save">Guardar objetivo</button>
       </div>
@@ -373,12 +411,13 @@ async function renderSettings() {
       <div class="setrow"><span>Actividades importadas</span><span class="v">${s.activities}</span></div>
       <div class="setrow"><span>Última actividad</span><span class="v">${s.last_activity ? shortDate(s.last_activity) : "—"}</span></div>
       <div class="sub" style="margin:8px 0">Los entrenamientos entran solos desde Strava. Puedes forzar una sincronización ahora:</div>
-      <button id="sync-now" class="btn-full">↻ Sincronizar con Strava</button>
+      <button id="sync-now" class="btn-full">${icon("refresh", 18)} Sincronizar con Strava</button>
       <div id="sync-msg" class="sub"></div>
     </div>
 
     <div class="card"><h3>Vikon IA</h3>
-      <div class="setrow"><span>Estado</span><span class="v">${s.llm.configured ? "✅ conectada" : "⚠️ sin clave"}</span></div>
+      <div class="setrow"><span>Estado</span><span class="v">${s.llm.configured
+        ? '<span class="stat-dot ok"></span>conectada' : '<span class="stat-dot warn"></span>sin clave'}</span></div>
       <div class="setrow"><span>Modelo</span><span class="v">${s.llm.model}</span></div>
       <div class="setrow"><span>Proveedor</span><span class="v">${llmHost}</span></div>
       ${s.llm.configured ? "" : `<div class="sub" style="margin-top:8px">Añade tu clave en el archivo <code>.env</code> para activar el chat.</div>`}
@@ -398,9 +437,12 @@ async function renderSettings() {
     try {
       const r = await api("/api/goal", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: $("#goal-name").value || null, date, priority: $("#goal-prio").value }),
+        body: JSON.stringify({
+          name: $("#goal-name").value || null, date,
+          kind: $("#goal-kind").value || null, priority: $("#goal-prio").value,
+        }),
       });
-      $("#goal-msg").textContent = `✓ Objetivo guardado (faltan ${r.days_to} días).`;
+      $("#goal-msg").textContent = `Objetivo guardado (faltan ${r.days_to} días).`;
       loadHome(); horizonLoaded = false;
       renderSettings();
     } catch (e) { $("#goal-msg").textContent = e.detail || "No se pudo guardar."; }
@@ -494,6 +536,9 @@ function profileFormHtml(p, onboarding) {
     <div class="grid2">
       <div class="field"><label>Evento</label><input id="pf-goal-name" value="${v(p.goal && p.goal.name)}" placeholder="Gran Fondo…" /></div>
       <div class="field"><label>Fecha</label><input type="date" id="pf-goal-date" value="${v(p.goal && p.goal.date)}" /></div>
+      <div class="field"><label>Tipo</label><select id="pf-goal-kind">${kindOptions(p.goal && p.goal.kind)}</select></div>
+      <div class="field"><label>Prioridad</label><select id="pf-goal-prio">
+        <option value="A">A · principal</option><option value="B">B</option><option value="C">C</option></select></div>
     </div>
 
     <div class="ob-sec">Datos físicos <span class="opt">· opcional</span></div>
@@ -552,6 +597,7 @@ async function submitProfile(onboarding) {
     weight_kg: num("#pf-weight"), hr_max: num("#pf-hrmax"), hr_rest: num("#pf-hrrest"),
     weekly_minutes_target: num("#wk-target"), availability,
     goal_name: str("#pf-goal-name"), goal_date: str("#pf-goal-date"),
+    goal_kind: str("#pf-goal-kind"), goal_priority: $("#pf-goal-prio").value || "A",
   };
   const btn = $("#pf-save"); btn.disabled = true;
   try {
@@ -626,6 +672,7 @@ async function syncThenLoad() {
 }
 
 // --- Init -------------------------------------------------------------------
+paintIcons();
 $("#today").textContent = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short" });
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => show(b.dataset.view)));
 $("#chat-send").addEventListener("click", sendChat);

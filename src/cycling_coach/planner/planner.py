@@ -81,6 +81,10 @@ QUALITY_INTENSITY = 0.85
 # en fatiga extrema, se fuerza un día de calidad (≈1-2/semana, cadencia
 # polarizada estándar). No aplica en semana de carrera. Ajustable.
 QUALITY_SPACING_DAYS = 4
+# Escalado del estímulo de calidad garantizada: cuanto más tiempo sin intensidad,
+# más duro el estímulo (recupera el top-end del puncheur). En días sin calidad:
+QUALITY_THRESHOLD_AFTER = 6   # ≥6 d → umbral
+QUALITY_VO2_AFTER = 8         # ≥8 d → VO2máx
 
 
 @dataclass
@@ -378,9 +382,10 @@ def plan_session(
     objective, phase_note = apply_phase(objective, phase)
 
     # Calidad garantizada: si hace demasiado que no metes intensidad y NO estás
-    # en fatiga extrema ni recuperando de un día duro, sube a calidad sostenible
-    # (sweet spot) para mantener el FTP/punch (rompe el "Z2 para siempre"). No en
-    # semana de carrera. Respeta la regla duro/fácil y el tope semanal.
+    # en fatiga extrema ni recuperando de un día duro, fuerza un día de calidad
+    # para mantener el FTP/punch (rompe el "Z2 para siempre"). El estímulo ESCALA
+    # con los días sin intensidad: sweet spot → umbral → VO2máx (un puncheur no
+    # puede pasar semanas sin top-end). No en semana de carrera; respeta duro/fácil.
     quality_note = None
     if (
         context is not None
@@ -392,10 +397,16 @@ def plan_session(
         and context.hard_days_last_week() < MAX_HARD_PER_WEEK
         and phase is not Phase.race
     ):
-        objective = Objective.sweet_spot
+        dsq = context.days_since_quality
+        if dsq >= QUALITY_VO2_AFTER:
+            objective = Objective.vo2max
+        elif dsq >= QUALITY_THRESHOLD_AFTER:
+            objective = Objective.threshold
+        else:
+            objective = Objective.sweet_spot
         quality_note = (
             f"calidad garantizada: {context.days_since_quality} días sin intensidad "
-            "→ sweet spot para mantener el FTP"
+            f"→ {objective.value} para mantener el FTP/punch"
         )
 
     # Dosis: si conocemos el estado (CTL/ATL), SIMULAMOS cada variante y elegimos

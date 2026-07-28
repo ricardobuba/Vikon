@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css?v=10" />
+  <link rel="stylesheet" href="/static/styles.css?v=11" />
 </head>
 <body>
   <div class="app">
@@ -49,14 +49,14 @@
     </main>
 
     <div class="quick" id="quick">
-      <button data-q="¿Qué hago hoy?">🚴 ¿Qué hago hoy?</button>
-      <button data-q="¿Cómo voy de forma?">📊 ¿Cómo voy?</button>
-      <button data-q="Hoy me siento cansado">😮‍💨 Me siento cansado</button>
-      <button data-q="" data-log="1">📝 Registrar</button>
+      <button data-q="¿Qué hago hoy?" data-icon="bike"><span class="ci"></span>¿Qué hago hoy?</button>
+      <button data-q="¿Cómo voy de forma?" data-icon="pulse"><span class="ci"></span>¿Cómo voy?</button>
+      <button data-q="Hoy me siento cansado" data-icon="battery"><span class="ci"></span>Cansado</button>
+      <button data-q="" data-log="1" data-icon="pencil"><span class="ci"></span>Registrar</button>
     </div>
     <div class="chat-input" id="chat-input">
       <input id="chat-text" placeholder="Escribe a Vikon…" autocomplete="off" />
-      <button id="chat-send">➤</button>
+      <button id="chat-send" data-icon="send" aria-label="Enviar"></button>
     </div>
 
     <div id="auth" class="overlay" style="display:none">
@@ -68,13 +68,13 @@
     </div>
 
     <nav>
-      <button data-view="home" class="active"><span class="ico">🏠</span>Hoy</button>
-      <button data-view="progress"><span class="ico">📊</span>Progreso</button>
-      <button data-view="horizon"><span class="ico">📈</span>Plan</button>
-      <button data-view="chat"><span class="ico">💬</span>Vikon</button>
-      <button data-view="settings"><span class="ico">⚙️</span>Ajustes</button>
+      <button data-view="home" data-icon="home" class="active"><span class="ico"></span>Hoy</button>
+      <button data-view="progress" data-icon="chart"><span class="ico"></span>Progreso</button>
+      <button data-view="horizon" data-icon="calendar"><span class="ico"></span>Plan</button>
+      <button data-view="chat" data-icon="chat"><span class="ico"></span>Vikon</button>
+      <button data-view="settings" data-icon="settings"><span class="ico"></span>Ajustes</button>
     </nav>
   </div>
-  <script src="/static/app.js?v=10"></script>
+  <script src="/static/app.js?v=11"></script>
 </body>
 </html>

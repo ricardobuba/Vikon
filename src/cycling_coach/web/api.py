@@ -194,6 +194,8 @@ class ProfileIn(BaseModel):
     availability: dict[int, int] | None = None   # weekday 0=lunes → minutos
     goal_name: str | None = None
     goal_date: str | None = None                 # objetivo opcional del onboarding
+    goal_kind: str | None = None                 # tipo de evento (gran_fondo, ruta…)
+    goal_priority: str = "A"
 
 
 def create_app() -> FastAPI:
@@ -359,7 +361,8 @@ def create_app() -> FastAPI:
             "weekly_minutes_target": a.weekly_minutes_target if a else None,
             "availability": get_availability(session, aid),
             "goal": (
-                {"name": goal.name, "date": goal.event_date.isoformat()} if goal else None
+                {"name": goal.name, "date": goal.event_date.isoformat(),
+                 "kind": goal.kind, "priority": goal.priority} if goal else None
             ),
         }
 
@@ -380,7 +383,10 @@ def create_app() -> FastAPI:
             set_availability(session, aid, body.availability)
         if body.goal_date:
             try:
-                add_goal(session, aid, date.fromisoformat(body.goal_date), name=body.goal_name)
+                add_goal(
+                    session, aid, date.fromisoformat(body.goal_date),
+                    name=body.goal_name, kind=body.goal_kind, priority=body.goal_priority,
+                )
             except ValueError as exc:
                 raise HTTPException(422, "Fecha de objetivo inválida.") from exc
         return {"ok": True}
