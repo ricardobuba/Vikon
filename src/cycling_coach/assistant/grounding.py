@@ -18,6 +18,7 @@ from cycling_coach.db.repositories import (
     training_seconds_on,
 )
 from cycling_coach.planner.planner import (
+    FormThresholds,
     PlannedSession,
     phase_for,
     plan_session,
@@ -50,6 +51,8 @@ class Facts:
     trained_minutes: int = 0
     plan_date: date | None = None        # día que planifica el plan (hoy o mañana)
     horizon: list[dict] = field(default_factory=list)   # próximos días (proyección)
+    thresholds: dict = field(default_factory=dict)      # cortes de forma personalizados
+    form_label: str | None = None        # etiqueta de forma (Fresco/Fatigado…)
 
     def to_prompt(self) -> str:
         """Serializa la ficha para el prompt (texto plano, claro y acotado)."""
@@ -112,6 +115,19 @@ class Facts:
         return "\n".join(L)
 
 
+def form_label(tsb: float, th: FormThresholds) -> str:
+    """Etiqueta humana de la forma según los cortes personalizados del atleta."""
+    if tsb < th.recovery_below:
+        return "Muy fatigado"
+    if tsb < th.endurance_below:
+        return "Fatigado"
+    if tsb < th.sweet_below:
+        return "Neutro"
+    if tsb < th.fresh_above:
+        return "Fresco"
+    return "Muy fresco"
+
+
 def planning_date(session: Session, athlete_id: int, today: date) -> tuple[date, int]:
     """Fecha que debe planificar el motor y minutos ya entrenados hoy. Si ya
     entrenó ≥20 min, planifica MAÑANA (la sesión de hoy está hecha)."""
@@ -147,6 +163,18 @@ def gather_facts(
     current, ctx = build_training_context(session, athlete_id, plan_date)
     if current is not None:
         facts.tsb, facts.ctl, facts.atl = current.tsb, current.ctl, current.atl
+        th = (
+            FormThresholds.personalize(ctx.tsb_history)
+            if ctx and ctx.tsb_history else FormThresholds()
+        )
+        facts.thresholds = {
+            "recovery": round(th.recovery_below, 1),
+            "endurance": round(th.endurance_below, 1),
+            "sweet": round(th.sweet_below, 1),
+            "fresh": round(th.fresh_above, 1),
+        }
+        if facts.tsb is not None:
+            facts.form_label = form_label(facts.tsb, th)
 
     cri_detail = compute_cri_service(session, athlete_id, plan_date)
     if cri_detail is not None:

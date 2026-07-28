@@ -2,17 +2,20 @@
 :root {
   --electric: #2E7DFF;
   --cyan: #2BC4FF;
-  --charcoal: #111318;
-  --charcoal-2: #171a21;
-  --card: #1b1f28;
-  --card-2: #20242f;
+  --charcoal: #232838;         /* fondo base, más claro */
+  --charcoal-2: #2a3042;       /* nav */
+  --card: #2f3547;
+  --card-2: #394057;
+  --border: #434b63;
   --white: #ffffff;
   --slate: #6B7280;
   --teal: #00D1B2;
+  --amber: #F5A623;
   --coral: #FF6B4A;
+  --red: #FF4D4D;
   --purple: #8B5CF6;
-  --text: #e7ebf2;
-  --muted: #9aa3b2;
+  --text: #eef1f7;
+  --muted: #a7b0c2;
   --grad: linear-gradient(100deg, var(--electric), var(--cyan));
   --radius: 18px;
 }
@@ -31,7 +34,7 @@ body {
   max-width: 460px;
   margin: 0 auto;
   min-height: 100vh;
-  background: radial-gradient(120% 60% at 50% -10%, #16202f 0%, var(--charcoal) 55%);
+  background: radial-gradient(120% 60% at 50% -10%, #2c3a5c 0%, var(--charcoal) 58%);
   display: flex;
   flex-direction: column;
   position: relative;
@@ -229,7 +232,7 @@ code { background: var(--card-2); border-radius: 5px; padding: 1px 6px; font-siz
 /* --- Onboarding / perfil (overlay) --- */
 .overlay {
   position: fixed; inset: 0; z-index: 50; overflow-y: auto;
-  background: radial-gradient(120% 60% at 50% -10%, #16202f 0%, var(--charcoal) 55%);
+  background: radial-gradient(120% 60% at 50% -10%, #2c3a5c 0%, var(--charcoal) 58%);
   display: flex; justify-content: center; align-items: flex-start;
 }
 .ob-card { width: 100%; max-width: 460px; padding: 24px 20px 40px; }
@@ -264,3 +267,51 @@ code { background: var(--card-2); border-radius: 5px; padding: 1px 6px; font-siz
 .ob-skip { text-align: center; margin-top: 12px; }
 .ob-skip a { color: var(--muted); font-size: 13px; cursor: pointer; text-decoration: underline; }
 #ob-msg, #au-msg { margin-top: 10px; font-size: 13px; color: var(--coral); text-align: center; }
+
+/* --- Animaciones y transiciones --- */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.hero, .card, .stats, .goal-pill { animation: fadeUp .34s ease both; }
+.hrow { animation: fadeUp .3s ease both; }
+.hrow:nth-child(2) { animation-delay: .03s; } .hrow:nth-child(3) { animation-delay: .06s; }
+.hrow:nth-child(4) { animation-delay: .09s; } .hrow:nth-child(5) { animation-delay: .12s; }
+.hrow:nth-child(6) { animation-delay: .15s; } .hrow:nth-child(7) { animation-delay: .18s; }
+main section { animation: fadeIn .25s ease both; }
+nav button, .block, .hrow, .stat { transition: color .2s, background .2s, transform .15s; }
+.hrow:active { transform: scale(.99); }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* --- Zonas de potencia (color por intensidad en los bloques) --- */
+.block { border-left: 3px solid transparent; }
+.block.z1 { border-left-color: var(--slate); }
+.block.z2 { border-left-color: var(--electric); }
+.block.z3 { border-left-color: var(--cyan); }
+.block.z4 { border-left-color: var(--amber); }
+.block.z5 { border-left-color: var(--coral); }
+.block.z6 { border-left-color: var(--red); }
+.block .w { color: var(--text); }
+
+/* --- Medidor de forma --- */
+.form-head { display: flex; justify-content: space-between; align-items: baseline; }
+.form-status { font-family: 'Sora'; font-weight: 700; font-size: 18px; }
+.gauge {
+  position: relative; height: 10px; border-radius: 6px; margin: 14px 0 6px;
+  background: linear-gradient(90deg, var(--red), var(--amber) 38%, var(--teal) 66%, var(--electric));
+}
+.gauge-marker {
+  position: absolute; top: -5px; width: 4px; height: 20px; border-radius: 2px;
+  background: #fff; box-shadow: 0 0 0 2px var(--card), 0 2px 6px rgba(0,0,0,.5);
+  transform: translateX(-50%); transition: left .5s cubic-bezier(.2,.8,.2,1);
+}
+.gauge-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+
+/* --- Detalle del día en el Plan (desplegable) --- */
+.hitem { margin-bottom: 8px; }
+.hitem .hrow { margin-bottom: 0; }
+.hrow { cursor: pointer; }
+.hrow .chev { color: var(--muted); font-size: 11px; transition: transform .2s; width: 14px; text-align: center; }
+.hrow.open { border-radius: 12px 12px 0 0; }
+.hrow.open .chev { transform: rotate(90deg); }
+.hdetail { overflow: hidden; background: var(--card-2); border-radius: 0 0 12px 12px; padding: 8px 12px 12px; animation: fadeIn .2s ease both; }
+.hdetail .block { margin: 6px 0; animation: none; background: var(--card); }
+.hdetail .empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }

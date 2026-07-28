@@ -159,6 +159,8 @@ def _facts_json(f: Facts) -> dict[str, Any]:
         "trained_minutes": f.trained_minutes,
         "plan_date": f.plan_date.isoformat() if f.plan_date else None,
         "plan": _plan_json(f.plan),
+        "thresholds": f.thresholds,
+        "form_label": f.form_label,
     }
 
 
@@ -223,6 +225,7 @@ def create_app() -> FastAPI:
                 "session": h.plan.template.name,
                 "minutes": round(h.plan.template.total_minutes()),
                 "tss": round(h.tss),
+                "targets": h.plan.targets,
             }
             for h in plan_horizon(session, aid, start, days=days)
         ]

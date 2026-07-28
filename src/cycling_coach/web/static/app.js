@@ -31,8 +31,11 @@ function labelDates(isoArr) {
 }
 
 // Curva de potencia: eje X logarítmico (5 s → 1 h), real vs modelo CP/W'.
-function powerChart(points, cp) {
-  const W = 340, H = 196;
+function fmtDur(s) { return s >= 60 ? (s % 60 === 0 ? s / 60 + " min" : (s / 60).toFixed(1) + " min") : s + " s"; }
+
+// Curva de potencia INTERACTIVA: eje X log (5 s→1 h), real vs modelo, tooltip.
+function mountPowerChart(el, points, cp) {
+  const W = 344, H = 198;
   const mL = 40, mR = 12, mT = 10, mB = 28;
   const iw = W - mL - mR, ih = H - mT - mB;
   const lx = (s) => Math.log10(s);
@@ -40,7 +43,7 @@ function powerChart(points, cp) {
   const xmin = lx(Math.min(...secs)), xmax = lx(Math.max(...secs));
   const X = (s) => mL + (lx(s) - xmin) / (xmax - xmin) * iw;
   const yv = points.flatMap((p) => [p.actual, p.predicted]).filter((v) => v != null);
-  if (!yv.length) return `<div class="sub">sin datos</div>`;
+  if (!yv.length) { el.innerHTML = `<div class="sub">sin datos</div>`; return; }
   const ymax = Math.max(...yv) * 1.05;
   const Y = (v) => mT + (1 - v / ymax) * ih;
 
@@ -49,19 +52,15 @@ function powerChart(points, cp) {
     return `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="#ffffff10"/>`
       + `<text x="${mL - 5}" y="${(+y + 3).toFixed(1)}" fill="var(--muted)" font-size="9" text-anchor="end">${Math.round(v)}</text>`;
   }).join("");
-  // línea del CP (asíntota aeróbica)
   if (cp) {
     const y = Y(cp).toFixed(1);
     grid += `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="#00D1B2" stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>`
       + `<text x="${W - mR}" y="${(+y - 4).toFixed(1)}" fill="#00D1B2" font-size="9" text-anchor="end">CP ${Math.round(cp)}W</text>`;
   }
-
   const ticksX = [[5, "5s"], [30, "30s"], [60, "1m"], [300, "5m"], [1200, "20m"], [3600, "1h"]];
   const xlab = ticksX.filter(([s]) => s >= Math.min(...secs) && s <= Math.max(...secs)).map(([s, t]) =>
     `<line x1="${X(s).toFixed(1)}" y1="${mT}" x2="${X(s).toFixed(1)}" y2="${mT + ih}" stroke="#ffffff08"/>`
-    + `<text x="${X(s).toFixed(1)}" y="${H - 8}" fill="var(--muted)" font-size="9" text-anchor="middle">${t}</text>`
-  ).join("");
-
+    + `<text x="${X(s).toFixed(1)}" y="${H - 8}" fill="var(--muted)" font-size="9" text-anchor="middle">${t}</text>`).join("");
   const line = (key, color, dash) => {
     const pts = points.filter((p) => p[key] != null).map((p) => `${X(p.seconds).toFixed(1)},${Y(p[key]).toFixed(1)}`);
     if (pts.length < 2) return "";
@@ -70,8 +69,35 @@ function powerChart(points, cp) {
   const dots = points.filter((p) => p.actual != null).map((p) =>
     `<circle cx="${X(p.seconds).toFixed(1)}" cy="${Y(p.actual).toFixed(1)}" r="2.6" fill="#2BC4FF"/>`).join("");
 
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${xlab}`
-    + `${line("predicted", "#2E7DFF", true)}${line("actual", "#2BC4FF", false)}${dots}</svg>`;
+  el.innerHTML =
+    `<div class="chart-wrap">
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
+        ${grid}${xlab}${line("predicted", "#2E7DFF", true)}${line("actual", "#2BC4FF", false)}${dots}
+        <g class="cross"></g>
+        <rect x="${mL}" y="${mT}" width="${iw}" height="${ih}" fill="transparent" style="touch-action:none"/>
+      </svg><div class="chart-tip" style="display:none"></div>
+    </div>`;
+
+  const svg = el.querySelector("svg"), cross = el.querySelector(".cross"), tip = el.querySelector(".chart-tip");
+  const move = (clientX) => {
+    const r = svg.getBoundingClientRect();
+    const vbx = (clientX - r.left) * (W / r.width);
+    let best = 0, bd = Infinity;
+    points.forEach((p, i) => { const d = Math.abs(X(p.seconds) - vbx); if (d < bd) { bd = d; best = i; } });
+    const p = points[best], cx = X(p.seconds).toFixed(1);
+    cross.innerHTML = `<line x1="${cx}" y1="${mT}" x2="${cx}" y2="${mT + ih}" stroke="#ffffff55"/>`
+      + (p.actual != null ? `<circle cx="${cx}" cy="${Y(p.actual).toFixed(1)}" r="3.5" fill="#2BC4FF" stroke="#0b0e14" stroke-width="1.5"/>` : "")
+      + (p.predicted != null ? `<circle cx="${cx}" cy="${Y(p.predicted).toFixed(1)}" r="3.5" fill="#2E7DFF" stroke="#0b0e14" stroke-width="1.5"/>` : "");
+    tip.style.display = "block";
+    tip.style.left = Math.max(15, Math.min(85, X(p.seconds) / W * 100)) + "%";
+    tip.innerHTML = `<b>${fmtDur(p.seconds)}</b>`
+      + (p.actual != null ? `<span><i style="background:#2BC4FF"></i>real ${Math.round(p.actual)} W</span>` : "")
+      + (p.predicted != null ? `<span><i style="background:#2E7DFF"></i>modelo ${Math.round(p.predicted)} W</span>` : "");
+  };
+  const hide = () => { cross.innerHTML = ""; tip.style.display = "none"; };
+  svg.addEventListener("pointermove", (e) => move(e.clientX));
+  svg.addEventListener("pointerdown", (e) => move(e.clientX));
+  svg.addEventListener("pointerleave", hide);
 }
 
 // Gráfica de líneas INTERACTIVA (tocar/pasar el dedo → valores). Soporta un
@@ -158,6 +184,42 @@ function mountChart(el, { dates, series, zeroLine = false, yunit = "", splitInde
   svg.addEventListener("pointerleave", hide);
 }
 
+// Zona de potencia (color) según el %FTP superior del bloque.
+function zoneFor(target) {
+  const m = target.match(/(\d+)\s*[–\-]\s*(\d+)\s*%/);
+  const hi = m ? +m[2] : 70;
+  if (hi < 56) return "z1";
+  if (hi < 76) return "z2";
+  if (hi < 88) return "z3";
+  if (hi < 106) return "z4";
+  if (hi < 121) return "z5";
+  return "z6";
+}
+function blockHtml(t) {
+  const m = t.match(/(\d[\d–\-]*\s*W)/);
+  const w = m ? m[1] : "", label = w ? t.replace(w, "").trim() : t;
+  return `<div class="block ${zoneFor(t)}"><span>${label}</span><span class="w">${w}</span></div>`;
+}
+
+// Medidor de forma: barra de color con marcador en tu TSB (zonas personalizadas).
+function formGauge(s) {
+  if (s.tsb == null) return "";
+  const th = s.thresholds || {};
+  const lo = (th.recovery != null ? th.recovery : -25) - 8;
+  const hi = (th.fresh != null ? th.fresh : 15) + 8;
+  const pos = Math.max(2, Math.min(98, (s.tsb - lo) / (hi - lo) * 100));
+  const label = s.form_label || "";
+  const color = {
+    "Muy fatigado": "var(--red)", "Fatigado": "var(--coral)", "Neutro": "var(--amber)",
+    "Fresco": "var(--teal)", "Muy fresco": "var(--electric)",
+  }[label] || "var(--text)";
+  return `<div class="card">
+    <div class="form-head"><h3>Tu forma</h3><span class="form-status" style="color:${color}">${label} · ${signed(s.tsb)}</span></div>
+    <div class="gauge"><div class="gauge-marker" style="left:${pos}%"></div></div>
+    <div class="gauge-labels"><span>Fatigado</span><span>Neutro</span><span>Fresco</span></div>
+  </div>`;
+}
+
 // --- Pantalla HOY -----------------------------------------------------------
 function renderHome(s) {
   const p = s.plan;
@@ -170,11 +232,7 @@ function renderHome(s) {
   let planHtml = `<div class="loading">No hay plan. Falta el FTP.</div>`;
   if (p) {
     const adjust = p.aspired ? `<div class="badge-adjust">rebajado desde ${p.aspired}</div>` : "";
-    const blocks = (p.targets || []).map((t) => {
-      const m = t.match(/(\d[\d–\-]*\s*W)/);
-      const w = m ? m[1] : "", label = w ? t.replace(w, "").trim() : t;
-      return `<div class="block"><span>${label}</span><span class="w">${w}</span></div>`;
-    }).join("");
+    const blocks = (p.targets || []).map(blockHtml).join("");
     planHtml = `${trained}
       <div class="hero"><div class="hero-inner">
         <div class="label">${planLabel}</div>
@@ -190,6 +248,7 @@ function renderHome(s) {
       <div class="stat"><span class="num">${fmt(s.cri)}</span><span class="k">CRI</span></div>
       <div class="stat"><span class="num">${fmt(s.ftp)}</span><span class="k">FTP W</span></div>
     </div>
+    ${formGauge(s)}
     ${goal}
     <div class="card"><h3>Forma y predicción</h3><div class="sub">Fitness (CTL) y frescura (TSB) · 60 días + próximos 7 (punteado). Toca la gráfica.</div><div id="form-svg" class="loading" style="padding:20px">…</div></div>
     ${p ? `<div class="rationale">${p.rationale}</div>` : ""}`;
@@ -228,12 +287,13 @@ async function renderProgress() {
   // Curva de potencia (real vs modelo) + coherencia del CP
   if (pc) {
     html += `<div class="card"><h3>Curva de potencia</h3>
-      <div class="sub">Tu mejor real (120 d) vs modelo CP/W'</div>
-      ${powerChart(pc.points, pc.cp)}
+      <div class="sub">Tu mejor real (120 d) vs modelo CP/W' · toca la gráfica</div>
+      <div id="pc-chart"></div>
       ${legend([{ color: "#2BC4FF", label: "Real (potencia máx.)" }, { color: "#2E7DFF", label: "Modelo CP/W'" }])}
       ${pc.verdict ? `<div class="verdict ${pc.coherent ? "ok" : "warn"}">${pc.verdict}</div>` : ""}</div>`;
   }
   box.innerHTML = html || `<div class="loading">Sin datos de potencia todavía.</div>`;
+  if (pc) mountPowerChart($("#pc-chart"), pc.points, pc.cp);
   if (ftp.length) {
     mountChart($("#ftp-chart"), {
       dates: labelDates(ftp.map((d) => d.day)), yunit: "W",
@@ -250,11 +310,25 @@ function renderHorizon(days) {
   const names = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
   $("#horizon-content").innerHTML = days.map((h, i) => {
     const d = i === 0 ? "HOY" : names[new Date(h.day).getDay()];
-    return `<div class="hrow"><span class="d">${d}</span>
-      <span class="o">${h.objective.replace("_", " ")}<br><span style="color:var(--muted);font-size:12px">${h.session}</span></span>
-      <span class="t">TSB ${signed(h.tsb)}<br>${h.tss} TSS</span>
-      <span class="bar" style="opacity:${0.3 + Math.min(h.tss, 120) / 120 * 0.7}"></span></div>`;
+    const detail = (h.targets && h.targets.length)
+      ? h.targets.map(blockHtml).join("")
+      : `<div class="empty">${h.objective === "rest" ? "Descanso — sin sesión." : "Sin bloques."}</div>`;
+    return `<div class="hitem">
+      <div class="hrow"><span class="d">${d}</span>
+        <span class="o">${h.objective.replace("_", " ")}<br><span style="color:var(--muted);font-size:12px">${h.session}</span></span>
+        <span class="t">TSB ${signed(h.tsb)}<br>${h.tss} TSS</span>
+        <span class="chev">▶</span></div>
+      <div class="hdetail" style="display:none">${detail}</div>
+    </div>`;
   }).join("");
+  $("#horizon-content").querySelectorAll(".hrow").forEach((row) => {
+    row.addEventListener("click", () => {
+      const det = row.parentElement.querySelector(".hdetail");
+      const open = det.style.display !== "none";
+      det.style.display = open ? "none" : "block";
+      row.classList.toggle("open", !open);
+    });
+  });
 }
 
 // --- Pantalla AJUSTES -------------------------------------------------------
