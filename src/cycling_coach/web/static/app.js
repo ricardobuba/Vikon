@@ -350,7 +350,7 @@ function renderActivities(list) {
       <div class="ahead">
         <span class="adot ${ZONE_OF_IF(a.intensity)}"></span>
         <div class="atitle"><b>${a.name || "Entrenamiento"}</b>
-          <span>${new Date(a.day).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short" })}</span></div>
+          <span>${new Date(a.day).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short" })}${a.session_label ? " · " + a.session_label : ""}</span></div>
         <span class="chev">${icon("chevron", 16)}</span>
       </div>
       <div class="amets">
@@ -359,27 +359,51 @@ function renderActivities(list) {
         ${stat(a.np_w, "W norm.")}
         ${stat(a.tss, "TSS")}
       </div>
-      <div class="adetail" style="display:none">
-        <p class="atext">${a.text}</p>
-        <div class="amets sub2">
-          ${stat(a.avg_power_w, "W media")}
-          ${stat(a.max_power_w, "W máx")}
-          ${stat(a.avg_hr, "ppm")}
-          ${stat(a.elevation_m, "m desnivel")}
-          ${stat(a.intensity, "IF")}
-          ${stat(a.kilojoules, "kJ")}
-        </div>
+      <div class="adetail" style="display:none" data-id="${a.id}">
+        <div class="loading" style="padding:12px">Cargando…</div>
       </div>
     </div>`;
   }).join("");
   box.querySelectorAll(".acard").forEach((c) => {
-    c.querySelector(".ahead").addEventListener("click", () => {
+    c.querySelector(".ahead").addEventListener("click", async () => {
       const d = c.querySelector(".adetail");
       const open = d.style.display !== "none";
       d.style.display = open ? "none" : "block";
       c.classList.toggle("open", !open);
+      if (!open && !d.dataset.loaded) {        // detalle bajo demanda
+        d.dataset.loaded = "1";
+        try { d.innerHTML = activityDetailHtml(await api(`/api/activity/${d.dataset.id}`)); }
+        catch (e) { d.innerHTML = `<div class="loading">${e.detail || "Error."}</div>`; }
+      }
     });
   });
+}
+
+// Ficha del entrenamiento: qué fue realmente + métricas + zonas + series.
+function activityDetailHtml(d) {
+  const stat = (v, k, u = "") => v == null ? "" : `<div class="am"><b>${v}${u}</b><span>${k}</span></div>`;
+  const totalZ = (d.zones || []).reduce((s, z) => s + z.seconds, 0) || 1;
+  const zbar = (d.zones || []).map((z) => {
+    const cls = "z" + (z.zone.match(/Z(\d)/) || [0, 2])[1];
+    return `<div class="zrow"><span class="zl">${z.zone}</span>
+      <span class="ztrack"><span class="zfill ${cls}" style="width:${(z.seconds / totalZ * 100).toFixed(1)}%"></span></span>
+      <span class="zv">${hhmm(z.seconds / 60)}</span></div>`;
+  }).join("");
+  const reps = (d.intervals || []).map((v, i) =>
+    `<div class="irow"><span>#${i + 1}</span><b>${hhmm(v.seconds / 60)}</b>
+      <span>${v.avg_w} W</span><span class="ipct">${v.pct_ftp}% FTP</span></div>`).join("");
+  return `
+    ${d.session_label ? `<div class="skind">${d.session_label}${d.detected ? ` · ${d.detected}` : ""}</div>` : ""}
+    <p class="atext">${d.text}</p>
+    <div class="amets sub2">
+      ${stat(d.avg_power_w, "W media")}${stat(d.np_w, "W norm.")}
+      ${stat(d.max_power_w, "W máx")}${stat(d.avg_hr, "ppm medio")}
+      ${stat(d.max_hr, "ppm máx")}${stat(d.avg_cadence, "rpm")}
+      ${stat(d.elevation_m, "m desnivel")}${stat(d.intensity, "IF")}
+      ${stat(d.kilojoules, "kJ")}${stat(d.tss, "TSS")}
+    </div>
+    ${zbar ? `<div class="ssec">Tiempo en zonas</div><div class="zones">${zbar}</div>` : ""}
+    ${reps ? `<div class="ssec">Series detectadas</div><div class="ivals">${reps}</div>` : ""}`;
 }
 
 let activitiesLoaded = false;
@@ -434,7 +458,7 @@ function renderHorizon(days) {
     return `<div class="hitem">
       <div class="hrow"><span class="d">${d}</span>
         <span class="o">${h.objective.replace("_", " ")}<br><span style="color:var(--muted);font-size:12px">${h.session}</span></span>
-        <span class="t">TSB ${signed(h.tsb)}<br>${h.tss} TSS</span>
+        <span class="t"><b class="hdur">${h.minutes ? hhmm(h.minutes) + " h" : "libre"}</b><br>${h.tss} TSS</span>
         <span class="chev">${icon("chevron", 14)}</span></div>
       <div class="hdetail" style="display:none">${detail}</div>
     </div>`;

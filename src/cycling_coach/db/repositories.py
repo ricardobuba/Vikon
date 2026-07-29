@@ -211,6 +211,23 @@ def load_power_activities(
     return [(start, aid, data) for start, aid, data in rows]
 
 
+def load_watts_stream(session: Session, activity_id: int) -> list | None:
+    """Serie de potencia (1 Hz) de una actividad. None si no la tiene."""
+    return session.execute(
+        select(Stream.data).where(
+            Stream.activity_id == activity_id, Stream.stream_type == "watts"
+        )
+    ).scalar_one_or_none()
+
+
+def get_activity(session: Session, athlete_id: int, activity_id: int) -> Activity | None:
+    return session.execute(
+        select(Activity).where(
+            Activity.id == activity_id, Activity.athlete_id == athlete_id
+        )
+    ).scalar_one_or_none()
+
+
 def store_parameter_estimate(
     session: Session, athlete_id: int, param: str, est: Estimate
 ) -> None:

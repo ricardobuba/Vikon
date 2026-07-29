@@ -417,3 +417,30 @@ nav button, .block, .hrow, .stat { transition: color .2s, background .2s, transf
   margin-top: 12px; font-size: 13px; line-height: 1.55; color: var(--text);
   background: var(--card-2); border-radius: 10px; padding: 11px 12px;
 }
+
+
+/* --- Ficha del entrenamiento: tipo real, zonas y series --- */
+.skind {
+  display: inline-block; font-family: 'Sora'; font-weight: 600; font-size: 12px;
+  background: rgba(31,107,236,.10); border: 1px solid rgba(31,107,236,.28);
+  color: var(--electric); border-radius: 999px; padding: 4px 11px; margin-bottom: 8px;
+}
+.ssec { font-family: 'Sora'; font-weight: 600; font-size: 12px; color: var(--muted); margin: 14px 0 7px; }
+.zones { display: flex; flex-direction: column; gap: 5px; }
+.zrow { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.zrow .zl { width: 96px; color: var(--muted); }
+.zrow .ztrack { flex: 1; height: 9px; background: var(--card-2); border-radius: 5px; overflow: hidden; }
+.zrow .zfill { display: block; height: 100%; border-radius: 5px; }
+.zfill.z1 { background: var(--slate); } .zfill.z2 { background: var(--electric); }
+.zfill.z3 { background: var(--cyan); }  .zfill.z4 { background: var(--amber); }
+.zfill.z5 { background: var(--coral); } .zfill.z6 { background: var(--red); }
+.zrow .zv { width: 44px; text-align: right; font-family: 'Sora'; font-weight: 600; }
+.ivals { display: flex; flex-direction: column; gap: 4px; }
+.irow {
+  display: flex; align-items: center; gap: 10px; font-size: 12px;
+  background: var(--card-2); border-radius: 8px; padding: 7px 11px;
+}
+.irow span:first-child { color: var(--muted); width: 24px; }
+.irow b { font-family: 'Sora'; width: 52px; }
+.irow .ipct { margin-left: auto; color: var(--coral); font-family: 'Sora'; font-weight: 600; }
+.hrow .hdur { font-family: 'Sora'; color: var(--text); font-size: 13px; }

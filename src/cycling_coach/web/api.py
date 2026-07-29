@@ -52,7 +52,7 @@ from cycling_coach.physiology import compute_ctl_atl_tsb
 from cycling_coach.planner.planner import PlannedSession
 from cycling_coach.planner.service import plan_horizon
 from cycling_coach.sync import SyncError, sync_recent
-from cycling_coach.twin.activity_service import list_activities
+from cycling_coach.twin.activity_service import activity_detail, list_activities
 from cycling_coach.twin.coherence_service import assess_cp_coherence, power_curve
 from cycling_coach.twin.load_service import daily_load_and_intensity, smoothed_cp_states
 
@@ -284,10 +284,19 @@ def create_app() -> FastAPI:
                 "elevation_m": a.elevation_m, "avg_power_w": a.avg_power_w,
                 "np_w": a.np_w, "max_power_w": a.max_power_w, "avg_hr": a.avg_hr,
                 "kilojoules": a.kilojoules, "intensity": a.intensity, "tss": a.tss,
-                "text": a.text,
+                "text": a.text, "session_label": a.session_label,
+                "session_kind": a.session_kind, "detected": a.detected,
             }
             for a in list_activities(session, aid, limit=limit)
         ]
+
+    @app.get("/api/activity/{activity_id}")
+    def activity_one(session: DB, aid: AID, activity_id: int) -> dict[str, Any]:
+        """Ficha completa de un entrenamiento: métricas, zonas e intervalos."""
+        d = activity_detail(session, aid, activity_id)
+        if d is None:
+            raise HTTPException(404, "Entrenamiento no encontrado.")
+        return d
 
     @app.get("/api/ftp")
     def ftp_history(session: DB, aid: AID) -> list[dict[str, Any]]:
