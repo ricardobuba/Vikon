@@ -13,6 +13,7 @@ from __future__ import annotations
 import sys
 import webbrowser
 from datetime import UTC, datetime
+from pathlib import Path
 
 import typer
 from dateutil import parser as dateparser
@@ -770,8 +771,14 @@ def serve_cmd(
     host: str = typer.Option(
         "0.0.0.0", help="Host. 0.0.0.0 = accesible desde el móvil en la misma WiFi."
     ),
+    reload: bool = typer.Option(
+        True, help="Recarga sola al cambiar el código (desarrollo). --no-reload para apagarlo."
+    ),
 ) -> None:
-    """Lanza la UI web (FastAPI) — pantalla Hoy + horizonte + chat con Vikon."""
+    """Lanza la UI web (FastAPI) — pantalla Hoy + horizonte + chat con Vikon.
+
+    Con `--reload` (por defecto) el servidor se reinicia solo cuando cambia el
+    código: no hace falta pararlo y arrancarlo a mano tras cada actualización."""
     import uvicorn
 
     typer.secho(f"Vikon en http://localhost:{port}", fg=typer.colors.CYAN, bold=True)
@@ -786,7 +793,15 @@ def serve_cmd(
             "  (si el móvil no conecta, permite el puerto en el firewall de Windows)",
             fg=typer.colors.BRIGHT_BLACK,
         )
-    uvicorn.run("cycling_coach.web.api:app", host=host, port=port, reload=False)
+    if reload:
+        typer.secho(
+            "  Recarga automática ACTIVA: al actualizar el código se reinicia solo.",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
+    uvicorn.run(
+        "cycling_coach.web.api:app", host=host, port=port, reload=reload,
+        reload_dirs=[str(Path(__file__).resolve().parent)] if reload else None,
+    )
 
 
 # --------------------------------------------------------------------------- #
