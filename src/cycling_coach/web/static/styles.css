@@ -511,3 +511,24 @@ nav button, .block, .hrow, .stat { transition: color .2s, background .2s, transf
 .cmtag.warn { background: rgba(201,124,8,.13); color: var(--amber); }
 .cmtag.bad { background: rgba(217,59,59,.13); color: var(--red); }
 .cmtag.info { background: rgba(31,107,236,.11); color: var(--electric); }
+
+/* --- Check-in diario (sueño + sensación): la única entrada de recuperación
+   que existe sin wearable. Deslizadores, como el resto de la app. */
+.ckrow { display: flex; align-items: center; gap: 10px; margin: 12px 0; font-size: 12px; }
+.ckrow > span { width: 104px; color: var(--muted); }
+.ckrow input[type="range"] {
+  flex: 1; -webkit-appearance: none; appearance: none; height: 6px;
+  border-radius: 3px; background: var(--card-2); outline: none;
+}
+.ckrow input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--grad); cursor: pointer;
+}
+.ckrow b { width: 108px; text-align: right; font-family: 'Sora'; font-size: 11px; }
+#ck-save {
+  width: 100%; border: none; background: var(--grad); color: #fff; font-weight: 700;
+  border-radius: 10px; padding: 10px; font-size: 13px; cursor: pointer; font-family: inherit;
+}
+.ckmsg { display: block; text-align: center; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.ckmsg.ok { color: var(--teal); }
+.ckmsg.bad { color: var(--red); }

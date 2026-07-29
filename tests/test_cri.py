@@ -87,3 +87,14 @@ def test_cri_works_the_same_shape_with_or_without_recovery():
     withrec = compute_cri({**base, "recovery": 0.9})
     assert withrec.coverage == 0.90
     assert "recovery" not in withrec.missing
+
+
+def test_full_coverage_with_checkin_and_compliance():
+    """Con check-in (recuperación) y plan registrado (cumplimiento) el CRI ya no
+    renuncia a nada: cobertura completa y sin componentes ausentes."""
+    full = compute_cri({
+        "performance": 0.8, "freshness": 0.6, "trend": 0.5,
+        "recovery": 0.9, "compliance": 0.7,
+    })
+    assert abs(full.coverage - 1.0) < 1e-9
+    assert full.missing == []

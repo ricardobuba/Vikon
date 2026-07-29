@@ -34,6 +34,22 @@ TSS_TOLERANCE = 0.25
 # Se considera que hubo sesión a partir de estos minutos (evita contar traslados).
 MIN_SESSION_MIN = 15
 
+# Crédito de cada estado para el componente "cumplimiento" del CRI. No es
+# binario a propósito: entrenar algo distinto NO es lo mismo que no entrenar, y
+# castigarlo igual daría una señal falsa al índice.
+STATUS_CREDIT: dict[str, float] = {
+    "cumplido": 1.0,
+    "descanso_ok": 1.0,
+    "más": 0.7,          # se pasó de carga: se hizo el trabajo, con exceso
+    "menos": 0.6,
+    "distinto": 0.6,     # entrenó, pero no lo prescrito
+    "extra": 0.7,        # sesión no planificada: no es incumplir
+    "no_hecho": 0.0,
+}
+# Con menos días registrados que esto el ratio no dice nada: se declara ausente
+# (el CRI renormaliza pesos) en vez de inventar un número.
+MIN_DAYS_FOR_SCORE = 3
+
 
 @dataclass
 class DayCompliance:
@@ -63,6 +79,15 @@ class ComplianceReport:
     @property
     def load_ratio(self) -> float | None:
         return self.tss_done / self.tss_planned if self.tss_planned else None
+
+    @property
+    def score(self) -> float | None:
+        """Adherencia en [0,1] para el CRI, con crédito parcial por estado.
+        None si hay pocos días: mejor un hueco declarado que un dato inventado."""
+        if len(self.days) < MIN_DAYS_FOR_SCORE:
+            return None
+        credits = [STATUS_CREDIT.get(d.status, 0.5) for d in self.days]
+        return sum(credits) / len(credits)
 
 
 def _status(

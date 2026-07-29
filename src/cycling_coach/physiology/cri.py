@@ -7,10 +7,11 @@ Es un RESUMEN heurístico para el usuario y una feature del planificador — NO 
 entrada al motor fisiológico (evita circularidad, cap. 5.4). Los pesos son
 ajustables/aprendibles por usuario (fase futura).
 
-v1: solo se computan los componentes con datos. Recuperación (HRV/sueño) y
-Cumplimiento (plan) aún no disponibles → se renormalizan los pesos sobre lo
-disponible y se declara la cobertura. Se muestra con esa limitación, no como un
-número cerrado.
+Solo se computan los componentes CON datos: los pesos se renormalizan sobre lo
+disponible y se declara la cobertura, para mostrarlo con su limitación y no como
+un número cerrado. Recuperación viene del check-in manual (sueño + sensación) y
+Cumplimiento del plan registrado; ambos faltan hasta que hay datos que los
+sostengan — un hueco declarado es más honesto que un valor inventado.
 """
 
 from __future__ import annotations

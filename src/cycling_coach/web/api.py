@@ -50,13 +50,16 @@ from cycling_coach.db.repositories import (
     get_plan_overrides,
     get_user,
     get_user_by_username,
+    latest_daily_metric,
     log_plan,
     next_goal,
     save_profile,
     set_availability,
     set_availability_override,
     set_plan_override,
+    upsert_daily_metric,
 )
+from cycling_coach.domain.models import CanonicalDailyMetric
 from cycling_coach.physiology import compute_ctl_atl_tsb
 from cycling_coach.planner.library import Objective
 from cycling_coach.planner.planner import PlannedSession
@@ -240,6 +243,12 @@ class GoalIn(BaseModel):
     priority: str = "A"
 
 
+class CheckinIn(BaseModel):
+    sleep_hours: float | None = None    # horas dormidas anoche
+    feel: float | None = None           # sensación / disposición 1–10
+    date: str | None = None             # ISO YYYY-MM-DD (por defecto, hoy)
+
+
 class DayPlanIn(BaseModel):
     date: str                        # ISO YYYY-MM-DD
     minutes: int | None = None       # disponibilidad de ESE día (0 = libre)
@@ -318,6 +327,50 @@ def create_app() -> FastAPI:
                 for d in rep.days
             ],
         }
+
+    @app.get("/api/checkin")
+    def checkin_get(session: DB, aid: AID) -> dict[str, Any]:
+        """Check-in de hoy: sueño y sensación. Alimenta la Recuperación del CRI
+        sin ningún wearable (autoinforme = señal validada de disposición)."""
+        today = date.today()
+        sleep = latest_daily_metric(session, aid, "sleep_hours", today)
+        feel = latest_daily_metric(session, aid, "readiness", today)
+        sleep_today = sleep[1] if sleep and sleep[0] == today else None
+        feel_today = feel[1] if feel and feel[0] == today else None
+        return {
+            "day": today.isoformat(),
+            "sleep_hours": sleep_today,
+            "feel": feel_today,
+            # `pending` dispara el saludo matinal del chat: si aún no has
+            # contado cómo has dormido, te lo pregunta al abrir.
+            "pending": sleep_today is None and feel_today is None,
+            "last_sleep": sleep[1] if sleep else None,      # para prerrellenar
+            "last_feel": feel[1] if feel else None,
+        }
+
+    @app.post("/api/checkin")
+    def checkin_post(session: DB, aid: AID, body: CheckinIn) -> dict[str, Any]:
+        day = date.fromisoformat(body.date) if body.date else date.today()
+        if body.sleep_hours is None and body.feel is None:
+            raise HTTPException(400, "Indica horas de sueño o sensación.")
+        saved: list[str] = []
+        if body.sleep_hours is not None:
+            if not 0 <= body.sleep_hours <= 16:
+                raise HTTPException(400, "Horas de sueño fuera de rango (0–16).")
+            upsert_daily_metric(
+                session, aid,
+                CanonicalDailyMetric("sleep_hours", day, body.sleep_hours, "manual"),
+            )
+            saved.append("sueño")
+        if body.feel is not None:
+            if not 1 <= body.feel <= 10:
+                raise HTTPException(400, "La sensación va de 1 a 10.")
+            upsert_daily_metric(
+                session, aid,
+                CanonicalDailyMetric("readiness", day, body.feel, "manual"),
+            )
+            saved.append("sensación")
+        return {"ok": True, "day": day.isoformat(), "saved": saved}
 
     @app.get("/api/horizon")
     def horizon(session: DB, aid: AID, days: int = 7) -> list[dict[str, Any]]:

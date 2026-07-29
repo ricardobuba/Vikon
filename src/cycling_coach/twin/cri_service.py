@@ -10,6 +10,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from cycling_coach.db.repositories import (
+    get_plan_log,
     latest_daily_metric,
     load_cri_weights,
     load_power_activities,
@@ -30,6 +31,7 @@ from cycling_coach.physiology.cri import (
     norm_recovery,
     norm_trend,
 )
+from cycling_coach.twin.compliance import compliance_report
 from cycling_coach.twin.load_service import daily_tss_series, smoothed_cp_states
 
 
@@ -91,6 +93,21 @@ def _components_asof(ctx: _Context, day: date) -> dict[str, float] | None:
     }
 
 
+# Ventana de adherencia que mira el CRI: reciente, porque es un índice de
+# disposición de HOY, no un historial.
+COMPLIANCE_WINDOW_DAYS = 14
+
+
+def _compliance_asof(session: Session, athlete_id: int, as_of: date) -> float | None:
+    """Adherencia al plan en las últimas semanas, [0,1]. None si no hay plan
+    registrado suficiente (entonces el CRI renormaliza sus pesos)."""
+    end = as_of - timedelta(days=1)          # hoy aún puede completarse
+    plan = get_plan_log(session, athlete_id, end - timedelta(days=COMPLIANCE_WINDOW_DAYS - 1), end)
+    if not plan:
+        return None
+    return compliance_report(session, athlete_id, plan).score
+
+
 def compute_cri_service(
     session: Session, athlete_id: int, as_of: date
 ) -> CRIDetail | None:
@@ -111,7 +128,7 @@ def compute_cri_service(
     sleep_h = sleep[1] if sleep and (as_of - sleep[0]) <= recent else None
     feel_v = feel[1] if feel and (as_of - feel[0]) <= recent else None
     comps["recovery"] = norm_recovery(sleep_hours=sleep_h, feel=feel_v)
-    comps["compliance"] = None    # sin plan (Fase 3)
+    comps["compliance"] = _compliance_asof(session, athlete_id, as_of)
     weights = load_cri_weights(session, athlete_id)
     return CRIDetail(
         result=compute_cri(comps, weights=weights),

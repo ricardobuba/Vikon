@@ -427,12 +427,16 @@ async function loadActivities() {
 async function renderProgress() {
   const box = $("#progress-content");
   box.innerHTML = SKELETON.cards;
-  const [ftp, pc, comp] = await Promise.all([
+  const [ftp, pc, comp, chk] = await Promise.all([
     api("/api/ftp").catch(() => []),
     api("/api/power-curve").catch(() => null),
     api("/api/compliance?days=28").catch(() => null),
+    api("/api/checkin").catch(() => null),
   ]);
   let html = "";
+  // Check-in diario: sueño + sensación. Es la única entrada de recuperación
+  // que tenemos sin wearable, y alimenta el CRI.
+  if (chk) html += checkinCard(chk);
   // Cumplimiento del plan: lo prescrito vs lo hecho (cierra el bucle).
   if (comp) {
     if (comp.rate == null) {
@@ -482,6 +486,56 @@ async function renderProgress() {
   }
   box.innerHTML = html || `<div class="loading">Sin datos de potencia todavía.</div>`;
   if (pc) mountPowerChart($("#pc-chart"), pc.points, pc.cp);
+  if (chk) wireCheckin();
+}
+
+// --- Check-in diario (sueño + sensación) ------------------------------------
+const FEEL_WORDS = {
+  1: "reventado", 2: "muy cansado", 3: "cansado", 4: "flojo", 5: "regular",
+  6: "bien", 7: "bastante bien", 8: "fuerte", 9: "muy fuerte", 10: "eufórico",
+};
+
+function checkinCard(c) {
+  const done = !c.pending;
+  const sleep = c.sleep_hours ?? c.last_sleep ?? 7.5;
+  const feel = Math.round(c.feel ?? c.last_feel ?? 6);
+  return `<div class="card" id="checkin">
+    <h3>¿Cómo has dormido?</h3>
+    <div class="sub">${done
+      ? "Registrado hoy. Puedes corregirlo si quieres."
+      : "Sin reloj no se puede medir el sueño, así que se pregunta. Tu propia percepción es una señal válida — alimenta la Recuperación del CRI."}</div>
+    <div class="ckrow"><span>Horas dormidas</span>
+      <input type="range" id="ck-sleep" min="0" max="12" step="0.25" value="${sleep}" />
+      <b id="ck-sleepl">${hhmm(sleep * 60)} h</b></div>
+    <div class="ckrow"><span>Cómo te sientes</span>
+      <input type="range" id="ck-feel" min="1" max="10" step="1" value="${feel}" />
+      <b id="ck-feell">${feel}/10 · ${FEEL_WORDS[feel]}</b></div>
+    <button id="ck-save">${done ? "Actualizar" : "Guardar check-in"}</button>
+    <span class="ckmsg" id="ck-msg"></span>
+  </div>`;
+}
+
+function wireCheckin() {
+  const s = $("#ck-sleep"), f = $("#ck-feel"), msg = $("#ck-msg");
+  if (!s) return;
+  s.addEventListener("input", () => { $("#ck-sleepl").textContent = hhmm(+s.value * 60) + " h"; });
+  f.addEventListener("input", () => {
+    $("#ck-feell").textContent = `${f.value}/10 · ${FEEL_WORDS[f.value]}`;
+  });
+  $("#ck-save").addEventListener("click", async () => {
+    msg.textContent = "Guardando…"; msg.className = "ckmsg";
+    try {
+      await api("/api/checkin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sleep_hours: +s.value, feel: +f.value }),
+      });
+      msg.textContent = "Guardado ✓"; msg.className = "ckmsg ok";
+      checkinPending = false;
+      loadHome();                    // el CRI cambia: refresca la portada
+    } catch (e) {
+      msg.textContent = e.detail || "No se pudo guardar."; msg.className = "ckmsg bad";
+    }
+  });
 }
 
 const OBJECTIVES = [
@@ -888,6 +942,8 @@ async function sendChat() {
         if (type === "meta") {
           const logged = Object.keys(data.logged || {});
           if (logged.length) addMsg("✓ registrado: " + logged.join(", "), "hint");
+          // Si contestaste el check-in por chat, no hay que volver a preguntarlo.
+          if (logged.includes("sleep_hours") || logged.includes("feel")) checkinPending = false;
           const changed = Object.keys(data.changed || {});
           if (changed.length) {
             addMsg("✓ actualizado: " + changed.join(", "), "hint");
@@ -925,6 +981,25 @@ async function sendChat() {
   }
 }
 
+// Saludo matinal: si aún no has hecho el check-in, el chat lo pregunta al
+// abrirlo. No es un push (el servidor corre en tu PC y puede estar apagado):
+// es un recibimiento fiable, sin depender de nada externo.
+let checkinPending = false;
+let greeted = false;
+
+function maybeGreet() {
+  if (greeted || !checkinPending) return;
+  greeted = true;
+  const h = new Date().getHours();
+  const when = h < 12 ? "Buenos días" : h < 21 ? "Buenas" : "Buenas noches";
+  addMsg(
+    `${when}. Antes de decidir el entreno de hoy: ¿cuántas horas has dormido `
+    + "y cómo te sientes del 1 al 10?", "bot",
+  );
+  addMsg('Puedes contestarme aquí (ej: "dormí 7h y me siento un 6") '
+    + "o usar los deslizadores en Progreso.", "hint");
+}
+
 // --- Navegación -------------------------------------------------------------
 function show(view) {
   ["home", "progress", "horizon", "activities", "chat", "settings"]
@@ -934,7 +1009,7 @@ function show(view) {
   const isChat = view === "chat";
   $("#chat-input").style.display = isChat ? "flex" : "none";
   $("#quick").style.display = isChat ? "flex" : "none";
-  if (isChat) $("#chat-text").focus();
+  if (isChat) { $("#chat-text").focus(); maybeGreet(); }
   if (view === "horizon") loadHorizon();
   if (view === "progress") renderProgress();
   if (view === "activities") loadActivities();
@@ -993,6 +1068,8 @@ async function boot() {
   try { prof = await api("/api/profile"); } catch (_) { /* sin atleta: sigue igual */ }
   if (prof && !prof.onboarded) showProfile({ onboarding: true });
   else syncThenLoad();
+  // ¿Falta el check-in de hoy? Entonces el chat lo preguntará al abrirlo.
+  try { checkinPending = (await api("/api/checkin")).pending; } catch (_) { /* da igual */ }
 }
 // PWA: registra el service worker para poder instalarla en el móvil.
 if ("serviceWorker" in navigator) {
