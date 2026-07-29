@@ -554,7 +554,9 @@ async function renderSettings() {
       <div class="setrow"><span>FTP</span><span class="v">${fmt(s.ftp)} W</span></div>
       <div class="setrow"><span>CP (potencia crítica)</span><span class="v">${fmt(s.cp)} W</span></div>
       <div class="setrow"><span>W′ (reserva anaeróbica)</span><span class="v">${wp}</span></div>
-      <div class="sub" style="margin-top:8px">Se recalcula con <code>cc estimate-cp</code> tras un test o esfuerzo máximo.</div>
+      <div class="sub" style="margin-top:8px">Se recalibra solo cuando entran entrenamientos nuevos con potencia.</div>
+      <button id="calib-now" class="btn-full">Recalibrar ahora</button>
+      <div id="calib-msg" class="sub"></div>
     </div>
 
     <div class="card"><h3>Objetivo</h3>
@@ -592,6 +594,19 @@ async function renderSettings() {
 
   $("#edit-profile").addEventListener("click", () => showProfile({ onboarding: false }));
   $("#logout-btn").addEventListener("click", logout);
+  const cal = $("#calib-now");
+  if (cal) cal.addEventListener("click", async (ev) => {
+    const btn = ev.currentTarget, msg = $("#calib-msg");
+    btn.disabled = true; msg.textContent = "Recalculando (unos segundos)…";
+    try {
+      const r = await api("/api/calibrate", { method: "POST" });
+      msg.textContent = r.ran
+        ? `✓ FTP ${r.ftp} W · CP ${r.cp} W${r.delta_ftp ? ` (${r.delta_ftp > 0 ? "+" : ""}${r.delta_ftp} W)` : ""}`
+        : `Sin cambios: ${r.reason}`;
+      loadHome(); renderSettings();
+    } catch (e) { msg.textContent = e.detail || "Error"; }
+    finally { btn.disabled = false; }
+  });
 
   $("#goal-save").addEventListener("click", async () => {
     const date = $("#goal-date").value;
@@ -637,7 +652,13 @@ function showAuth(hasUsers) {
         body: JSON.stringify({ username, password }),
       });
       $("#auth").style.display = "none";
-      boot();                       // ahora autenticado → onboarding o app
+      // PWA: registra el service worker para poder instalarla en el móvil.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () =>
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {}));
+}
+
+boot();                       // ahora autenticado → onboarding o app
     } catch (e) { $("#au-msg").textContent = e.detail || "No se pudo."; btn.disabled = false; }
   };
   const render = () => {
@@ -664,7 +685,13 @@ function showAuth(hasUsers) {
 
 async function logout() {
   try { await api("/api/logout", { method: "POST" }); } catch (_) {}
-  boot();
+  // PWA: registra el service worker para poder instalarla en el móvil.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () =>
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {}));
+}
+
+boot();
 }
 
 // --- Perfil / onboarding ----------------------------------------------------
@@ -796,7 +823,14 @@ async function sendChat() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: msg }),
     });
-    if (!resp.ok || !resp.body) throw new Error("sin stream");
+    if (!resp.ok) {                          // di la VERDAD, no un genérico
+      let detail = `Error ${resp.status}`;
+      try { detail = (await resp.json()).detail || detail; } catch (_) {}
+      if (resp.status === 401) detail = "Tu sesión ha caducado. Vuelve a entrar.";
+      pending.textContent = detail;
+      return;
+    }
+    if (!resp.body) throw new Error("sin stream");   // navegador sin streaming
     const reader = resp.body.getReader(), dec = new TextDecoder();
     let buf = "", started = false;
     for (;;) {
@@ -834,9 +868,19 @@ async function sendChat() {
     }
     if (!started && pending.textContent === "…") pending.textContent = "No pude responder.";
     loadHome();
-  } catch (e) {
-    pending.remove();
-    addMsg(e.detail || "No pude responder (¿LLM configurado?).", "bot");
+  } catch (_) {
+    // Plan B: si el streaming falla (navegador viejo, proxy que lo corta), se
+    // pide la respuesta completa por el endpoint clásico.
+    try {
+      const r = await api("/api/chat", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg }),
+      });
+      pending.textContent = r.text;
+      loadHome();
+    } catch (e2) {
+      pending.textContent = e2.detail || "No pude responder. Mira la consola del servidor.";
+    }
   }
 }
 
@@ -904,4 +948,10 @@ async function boot() {
   if (prof && !prof.onboarded) showProfile({ onboarding: true });
   else syncThenLoad();
 }
+// PWA: registra el service worker para poder instalarla en el móvil.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () =>
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {}));
+}
+
 boot();

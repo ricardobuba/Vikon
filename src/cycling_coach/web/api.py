@@ -61,6 +61,7 @@ from cycling_coach.planner.service import plan_horizon
 from cycling_coach.planner.simulator import session_intensity
 from cycling_coach.sync import SyncError, sync_recent
 from cycling_coach.twin.activity_service import activity_detail, list_activities
+from cycling_coach.twin.autocalibrate import autocalibrate
 from cycling_coach.twin.coherence_service import assess_cp_coherence, power_curve
 from cycling_coach.twin.load_service import daily_load_and_intensity, smoothed_cp_states
 
@@ -79,11 +80,35 @@ async def _sync_loop(interval_s: int) -> None:
                 "Sync automático: %d nuevas, %d ya existentes.",
                 r.activities_ingested, r.skipped_existing,
             )
+            # El FTP/CP se recalibra solo cuando llegan datos que lo justifican
+            # (los vatios del plan salen de ahí; antes solo se actualizaba a mano).
+            if r.activities_ingested:
+                out = await asyncio.to_thread(_recalibrate)
+                if out and out.ran:
+                    delta = f" ({out.delta_ftp:+.0f} W)" if out.delta_ftp else ""
+                    _log.info(
+                        "Autocalibración: FTP %.0f W, CP %.0f W%s — %s",
+                        out.ftp, out.cp, delta, out.reason,
+                    )
         except SyncError as exc:
             _log.warning("sync automático falló: %s", exc)
         except Exception:                       # nunca tumbar el bucle
             _log.exception("sync automático: error inesperado")
         await asyncio.sleep(interval_s)
+
+
+def _recalibrate():
+    """Reestima CP/W'/FTP del atleta si hay datos nuevos. Nunca revienta el
+    bucle de sync: un fallo aquí no debe cortar la ingesta."""
+    try:
+        with session_scope() as session:
+            aid = first_athlete_id(session)
+            if aid is None:
+                return None
+            return autocalibrate(session, aid)
+    except Exception:
+        _log.exception("autocalibración: error inesperado")
+        return None
 
 
 @asynccontextmanager
@@ -473,6 +498,17 @@ def create_app() -> FastAPI:
             "objective": chosen.get(d, "auto"),
         }
 
+    @app.post("/api/calibrate")
+    def calibrate_ep(session: DB, aid: AID, force: bool = True) -> dict[str, Any]:
+        """Recalcula CP/W'/FTP ahora (botón de Ajustes)."""
+        out = autocalibrate(session, aid, force=force)
+        return {
+            "ran": out.ran, "reason": out.reason,
+            "ftp": round(out.ftp) if out.ftp else None,
+            "cp": round(out.cp) if out.cp else None,
+            "delta_ftp": round(out.delta_ftp) if out.delta_ftp else None,
+        }
+
     @app.post("/api/goal")
     def set_goal_ep(body: GoalIn, session: DB, aid: AID) -> dict[str, Any]:
         try:
@@ -617,6 +653,16 @@ def create_app() -> FastAPI:
         @app.get("/")
         def index() -> FileResponse:
             return FileResponse(_STATIC / "index.html")
+
+        @app.get("/sw.js")
+        def service_worker() -> FileResponse:
+            """El service worker se sirve desde la RAÍZ a propósito: uno servido
+            bajo /static solo podría controlar /static, y la PWA necesita toda
+            la app para ser instalable."""
+            return FileResponse(
+                _STATIC / "sw.js", media_type="application/javascript",
+                headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-store"},
+            )
 
     return app
 

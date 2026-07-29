@@ -1,0 +1,17 @@
+{
+  "name": "Vikon — entrenador de ciclismo",
+  "short_name": "Vikon",
+  "description": "Tu entrenador con gemelo digital: plan diario, progreso y chat.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#E9F0FA",
+  "theme_color": "#1F6BEC",
+  "lang": "es",
+  "icons": [
+    { "src": "/static/isotipo.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/isotipo.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" }
+  ]
+}
