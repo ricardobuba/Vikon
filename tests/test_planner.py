@@ -421,3 +421,63 @@ def test_never_three_hard_in_a_row():
         assert ctx.allows_back_to_back() is False
         obj, _ = apply_constraints(Objective.threshold, ctx)
         assert INTENSITY_RANK[obj] < INTENSITY_RANK[Objective.sweet_spot]
+
+
+# --- Semana de descarga (deload) con presupuesto SEMANAL de carga -----------
+def _loaded_ctx() -> TrainingContext:
+    """Atleta que lleva semanas construyendo (CTL al alza) con carga real."""
+    recent = [
+        RecentDay(date(2026, 7, 25) + timedelta(days=i), 80.0, 0.7) for i in range(7)
+    ]
+    return TrainingContext(
+        recent=recent, fitness_pct=0.5, tsb_history=[],
+        ctl_window=[45.0 + i * 0.9 for i in range(8)],     # +6.3 CTL/semana
+    )
+
+
+def _weekly_tss(hz) -> list[float]:
+    return [sum(d.tss for d in hz[w * 7:(w + 1) * 7]) for w in range(len(hz) // 7)]
+
+
+def test_deload_week_actually_cuts_weekly_load():
+    hz = roll_horizon(
+        ftp=348.0, ctl=50.0, atl=48.0, context=_loaded_ctx(),
+        days=28, start=date(2026, 8, 1),
+    )
+    weeks = _weekly_tss(hz)
+    deload = [
+        w for w in range(4)
+        if any("descarga" in d.plan.rationale for d in hz[w * 7:(w + 1) * 7])
+    ]
+    assert deload, "tras 3 semanas construyendo debe aparecer una descarga"
+    w = deload[0]
+    # La descarga BAJA de verdad la carga semanal (no solo se etiqueta).
+    assert weeks[w] < 0.75 * weeks[w - 1]
+
+
+def test_deload_resets_and_load_resumes():
+    # El fallo anterior: la descarga se quedaba pegada para siempre.
+    hz = roll_horizon(
+        ftp=348.0, ctl=50.0, atl=48.0, context=_loaded_ctx(),
+        days=42, start=date(2026, 8, 1),
+    )
+    flags = [
+        any("descarga" in d.plan.rationale for d in hz[w * 7:(w + 1) * 7])
+        for w in range(6)
+    ]
+    assert flags.count(True) >= 1 and flags.count(False) >= 3   # alterna
+    weeks = _weekly_tss(hz)
+    w = flags.index(True)
+    assert weeks[w + 1] > weeks[w]        # tras descargar, se vuelve a construir
+
+
+def test_no_deload_without_building():
+    # Si la carga NO ha subido, no hay nada que descargar.
+    flat = TrainingContext(
+        recent=[RecentDay(date(2026, 7, 25) + timedelta(days=i), 40.0, 0.6) for i in range(7)],
+        fitness_pct=0.5, tsb_history=[], ctl_window=[45.0] * 8,   # CTL plano
+    )
+    hz = roll_horizon(
+        ftp=348.0, ctl=45.0, atl=45.0, context=flat, days=14, start=date(2026, 8, 1),
+    )
+    assert not any("descarga" in d.plan.rationale for d in hz[:7])

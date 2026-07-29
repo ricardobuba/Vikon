@@ -84,6 +84,15 @@ QUALITY_SPACING_DAYS = 4
 # Con esta disponibilidad o menos (días/semana), separar siempre la calidad
 # equivaldría a no entrenarla: se permite encadenar dos días duros.
 LOW_AVAILABILITY_DAYS = 4
+
+# --- Principio de RECUPERACIÓN: semana de descarga (deload) ------------------
+# Tras varias semanas encadenadas construyendo carga, una semana más suave
+# consolida la adaptación. Se implementa como PRESUPUESTO SEMANAL de carga (no
+# recortando escalones día a día: eso no bajaba el total). Emergente: cuenta
+# semanas reales de CTL al alza, así que si no has construido, no hay descarga.
+DELOAD_AFTER_BUILD_WEEKS = 3   # 3 semanas construyendo → la 4ª descarga
+DELOAD_FRACTION = 0.6          # la semana de descarga suma ~60% de la anterior
+BUILD_WEEK_MIN_RAMP = 1.0      # CTL/semana que cuenta como "semana de carga"
 # Eventos cuya especificidad pide rendir en días consecutivos (bloques).
 STACKING_EVENTS = {"vuelta_etapas", "gran_fondo"}
 
@@ -179,6 +188,23 @@ def event_quality(kind: str | None, index: int) -> Objective:
     con tu forma real, y la prescripción fina vendrá del RAG de literatura."""
     menu = _EVENT_QUALITY_MENU.get(kind or "", _DEFAULT_QUALITY_MENU)
     return menu[index % len(menu)]
+
+
+def count_build_weeks(ctl_series: list[float], max_weeks: int = 8) -> int:
+    """Semanas consecutivas (hacia atrás desde hoy) en las que el CTL SUBIÓ al
+    menos `BUILD_WEEK_MIN_RAMP`. Dispara la semana de descarga: si tu carga no ha
+    subido, no hay nada que descargar. `ctl_series` va de viejo a nuevo (1/día)."""
+    weeks = 0
+    for w in range(max_weeks):
+        end = len(ctl_series) - 1 - w * 7
+        start = end - 7
+        if start < 0:
+            break
+        if ctl_series[end] - ctl_series[start] >= BUILD_WEEK_MIN_RAMP:
+            weeks += 1
+        else:
+            break
+    return weeks
 
 
 def days_since_quality(recent: list[RecentDay]) -> int:
@@ -625,12 +651,34 @@ def roll_horizon(
     endur_n = 0           # nº de días aeróbicos (para rotar corto/medio)
     quality_n = 0         # nº de días de calidad (rota el menú del evento)
 
+    # Semana de descarga: contador de semanas encadenadas construyendo carga y
+    # presupuesto SEMANAL de TSS (lo que de verdad baja el total).
+    build_run = count_build_weeks(window) if len(window) >= 8 else 0
+    prev_week_tss = sum(d.tss for d in recent[-7:]) or 0.0
+    week_tss = 0.0
+    deload_week = False
+    week_budget: float | None = None
+
     out: list[HorizonDay] = []
     for i in range(days):
         day = start + timedelta(days=i)
         tsb = ctl - atl
         dte = (days_to_event - i) if days_to_event is not None else None
         phase = phase_for(dte)
+
+        # --- Frontera de semana: ¿toca descargar? ---
+        if i % 7 == 0:
+            if i > 0:
+                prev_week_tss = week_tss
+                build_run = 0 if deload_week else build_run + 1
+            week_tss = 0.0
+            # El taper ya descarga de por sí: no encadenamos las dos.
+            deload_week = (
+                build_run >= DELOAD_AFTER_BUILD_WEEKS
+                and prev_week_tss > 0
+                and phase not in (Phase.taper, Phase.race)
+            )
+            week_budget = DELOAD_FRACTION * prev_week_tss if deload_week else None
 
         # Minutos disponibles ese día: manda la EXCEPCIÓN puntual de esa fecha,
         # si no la semanal por día, si no el tope general. 0 = descanso.
@@ -685,7 +733,32 @@ def roll_horizon(
                     rationale=plan.rationale + f" [variedad aeróbica: {kind}]",
                 )
 
+        # Semana de descarga: la sesión se recorta al PRESUPUESTO restante,
+        # repartido entre los días que quedan. Se conserva el TIPO de sesión
+        # (recortar volumen manteniendo intensidad); si no cabe ni la más suave,
+        # el día es descanso.
+        if week_budget is not None:
+            days_left = 7 - (i % 7)
+            target = max(0.0, (week_budget - week_tss) / days_left)
+            if estimate_session_tss(plan.template) > target:
+                fits = [
+                    v for v in LIBRARY[plan.objective].variants
+                    if estimate_session_tss(v) <= target
+                ]
+                if fits:
+                    tmpl = fits[-1]
+                    plan = replace(
+                        plan, template=tmpl, targets=render_targets(tmpl, ftp),
+                        rationale=plan.rationale
+                        + f" [semana de descarga: dosis al presupuesto ({target:.0f} TSS)]",
+                    )
+                else:
+                    plan = rest_session(
+                        ftp, "semana de descarga: hoy descansas para asimilar la carga"
+                    )
+
         tss = estimate_session_tss(plan.template)
+        week_tss += tss
         out.append(HorizonDay(day, tsb, ctl, atl, phase, plan, tss))
 
         # Avanzar el estado simulado y la historia para el día siguiente.
