@@ -21,9 +21,23 @@ hipótesis ni preguntas), o null. Claves posibles (usa solo las mencionadas):
 reposo), "hrv_rmssd" (HRV/VFC), "feel" (sensación en escala 1–10; convierte \
 "fatal/reventado"≈2, "regular"≈5, "bien"≈7, "genial/perfecto"≈9).
 
+- "profile": objeto con datos PERMANENTES del ciclista que pide cambiar, o null. \
+Claves posibles (solo las mencionadas): "ftp" (FTP en vatios), "weight_kg", \
+"height_cm", "hr_max", "hr_rest", "level" (uno de: principiante, intermedio, \
+avanzado, elite), "weekly_minutes_target" (minutos/semana), "availability" \
+(objeto {"0".."6": minutos}, 0=lunes … 6=domingo; convierte horas a minutos).
+- "activity": objeto para corregir un ENTRENAMIENTO ya hecho, o null. Claves: \
+"date" (AAAA-MM-DD; usa "last" si dice "el último"/"mi última salida"), \
+"maximal_test" (true si dice que fue un test o esfuerzo a tope/máximo), \
+"feel" (sensación 1–10 de ESE día), "rpe" (esfuerzo percibido 1–10 de ESE día).
+
 REGLA CLAVE de "log": solo incluye un valor si el ciclista lo afirma de sí mismo \
 AHORA ("peso 72", "dormí 6h", "me siento hecho polvo"). NUNCA en preguntas o \
 condicionales ("¿y si pesara…?", "¿cuánto debería dormir?").
+
+DISTINGUE "log" de "profile": "hoy peso 72" es log (dato del día); "mi FTP es \
+340", "los martes tengo 90 minutos", "mido 178" son profile (permanente). Usa \
+"profile"/"activity" SOLO si pide cambiarlo, nunca si pregunta por ello.
 
 No inventes valores. Si algo no aparece, usa null. Responde solo el JSON.\
 """

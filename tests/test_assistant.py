@@ -190,3 +190,57 @@ def test_chat_sticky_intent(monkeypatch):
     assert calls["minutes"] == [40.0, 40.0, 40.0]        # minutos persisten
     assert calls["cri"] == [None, None, 80.0]            # readiness solo al final
     assert len(chat.history) == 6                        # 3 turnos (user+assistant)
+
+
+# --- El chat MODIFICA datos (perfil del ciclista y entrenamientos) ----------
+def test_parse_intent_extracts_profile_and_activity():
+    from cycling_coach.assistant import assistant as A
+
+    class _LLM:
+        def extract_json(self, system, user):
+            return {
+                "kind": "plan",
+                "profile": {"ftp": 355, "availability": {"1": 90, "6": 0}},
+                "activity": {"date": "last", "maximal_test": True, "rpe": 9},
+            }
+
+    intent = A.parse_intent(_LLM(), "mi FTP es 355; el último entreno fue a tope")
+    assert intent.profile["ftp"] == 355
+    assert intent.profile["availability"]["1"] == 90
+    assert intent.activity["maximal_test"] is True
+
+
+def test_profile_writes_are_range_checked(monkeypatch):
+    """El LLM traduce, NO decide: los valores absurdos se descartan."""
+    from cycling_coach.assistant import assistant as A
+
+    saved, avail = {}, {}
+    monkeypatch.setattr(A, "save_profile", lambda s, a, d: saved.update(d))
+    monkeypatch.setattr(A, "set_availability", lambda s, a, d: avail.update(d))
+    monkeypatch.setattr(A, "store_parameter_estimate", lambda *a, **k: None)
+
+    applied = A.apply_profile(None, 1, {
+        "ftp": 5000,            # imposible → fuera
+        "weight_kg": 72.5,      # válido
+        "hr_max": 185,          # válido
+        "height_cm": 5,         # imposible → fuera
+        "level": "pro",         # no está en la lista → fuera
+        "availability": {"0": 90, "9": 60, "3": 9999},   # día y minutos inválidos fuera
+    })
+    assert applied["weight_kg"] == 72.5 and applied["hr_max"] == 185
+    assert "ftp" not in applied and "height_cm" not in applied and "level" not in applied
+    assert avail == {0: 90}
+
+
+def test_profile_ftp_becomes_usable_estimate(monkeypatch):
+    from cycling_coach.assistant import assistant as A
+
+    stored = {}
+    monkeypatch.setattr(A, "save_profile", lambda s, a, d: None)
+    monkeypatch.setattr(
+        A, "store_parameter_estimate",
+        lambda s, a, param, est, **kw: stored.update({param: est.mean}),
+    )
+    applied = A.apply_profile(None, 1, {"ftp": 355})
+    assert applied["ftp"] == 355.0
+    assert stored["ftp"] == 355.0        # el plan usará ya ese FTP

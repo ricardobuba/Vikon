@@ -12,7 +12,9 @@ const ICON = {
   calendar: '<rect x="4" y="5" width="16" height="15" rx="2.2"/><path d="M4 9.5h16M8.5 3v4M15.5 3v4"/>',
   chat: '<path d="M20 14.5a2 2 0 0 1-2 2H8l-4 3.5V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/>',
   settings: '<path d="M3.5 7.5h9M17 7.5h3.5M3.5 16.5h3M11 16.5h9.5"/><circle cx="14.5" cy="7.5" r="2.1"/><circle cx="7.5" cy="16.5" r="2.1"/>',
-  bike: '<circle cx="6" cy="16" r="3.3"/><circle cx="18" cy="16" r="3.3"/><path d="M6 16l4.2-7H14l3.6 7M9.5 9h5.2l-1.7 3.4"/>',
+  bike: '<circle cx="5.5" cy="16.5" r="3.6"/><circle cx="18.5" cy="16.5" r="3.6"/>'
+      + '<path d="M12 16.5 9.2 9.6 15.4 8.2 12 16.5M12 16.5H5.5M15.4 8.2 18.5 16.5"/>'
+      + '<path d="M8 9.6h2.6M14 6.9h2.8"/>',
   pulse: '<path d="M3 12h4l2.4 6 4-13 2.3 7H21"/>',
   battery: '<rect x="3" y="8.5" width="15" height="8" rx="1.6"/><path d="M21 11v3"/><path d="M6.5 11v3"/>',
   pencil: '<path d="M4 20l1-4L15.5 5.5 19 9 8 20z"/><path d="M13.5 7.5 17 11"/>',
@@ -702,6 +704,11 @@ async function sendChat() {
     pending.remove();
     const logged = Object.keys(r.logged || {});
     if (logged.length) addMsg("✓ registrado: " + logged.join(", "), "hint");
+    const changed = Object.keys(r.changed || {});
+    if (changed.length) {
+      addMsg("✓ actualizado: " + changed.join(", "), "hint");
+      horizonLoaded = false; activitiesLoaded = false;   // el cambio afecta al plan
+    }
     const hint = [];
     if (r.intent.minutes != null) hint.push(r.intent.minutes + " min");
     if (r.intent.readiness) hint.push(r.intent.readiness);
