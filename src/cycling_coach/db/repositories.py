@@ -353,25 +353,37 @@ def add_goal(
     kind: str | None = None,
     priority: str = "A",
 ) -> Goal:
-    """Registra un evento objetivo (horizonte del planner, grieta 5)."""
-    goal = Goal(
-        athlete_id=athlete_id,
-        event_date=event_date,
-        name=name,
-        kind=kind,
-        priority=priority,
-    )
-    session.add(goal)
+    """Registra (o ACTUALIZA) el evento objetivo de esa fecha.
+
+    Upsert por (atleta, fecha): guardar el perfil dos veces no debe duplicar el
+    objetivo — antes se acumulaban y el planner podía quedarse con una versión
+    vieja sin `kind`, ignorando el tipo de evento."""
+    goal = session.execute(
+        select(Goal).where(Goal.athlete_id == athlete_id, Goal.event_date == event_date)
+        .order_by(Goal.id.desc()).limit(1)
+    ).scalar_one_or_none()
+    if goal is None:
+        goal = Goal(athlete_id=athlete_id, event_date=event_date)
+        session.add(goal)
+    if name is not None:
+        goal.name = name
+    if kind is not None:
+        goal.kind = kind
+    goal.priority = priority
     session.flush()
     return goal
 
 
 def next_goal(session: Session, athlete_id: int, on_or_after: date) -> Goal | None:
-    """Próximo evento futuro (el más cercano; a igualdad, mayor prioridad A<B<C)."""
+    """Próximo evento futuro (el más cercano; a igualdad, mayor prioridad A<B<C).
+
+    Último desempate: el registrado MÁS RECIENTEMENTE (id desc) — si hay
+    duplicados antiguos de la misma fecha, manda el último que guardaste (que es
+    el que lleva el tipo de evento actualizado)."""
     return session.execute(
         select(Goal)
         .where(Goal.athlete_id == athlete_id, Goal.event_date >= on_or_after)
-        .order_by(Goal.event_date.asc(), Goal.priority.asc())
+        .order_by(Goal.event_date.asc(), Goal.priority.asc(), Goal.id.desc())
         .limit(1)
     ).scalar_one_or_none()
 

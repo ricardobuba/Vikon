@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css?v=12" />
+  <link rel="stylesheet" href="/static/styles.css?v=13" />
 </head>
 <body>
   <div class="app">
@@ -16,6 +16,7 @@
       <img src="/static/logo.png" alt="Vikon" />
       <div class="brand"><span>Vikon</span></div>
       <div class="date" id="today"></div>
+      <button id="gear" class="gear" title="Ajustes" aria-label="Ajustes"></button>
     </header>
 
     <main>
@@ -40,6 +41,12 @@
         <div class="chat-log" id="chat-log">
           <div class="msg bot">¡Hola! Soy Vikon. Pregúntame qué toca hoy, dime cuánto tiempo tienes, cómo te encuentras, o registra tu peso y sueño.</div>
         </div>
+      </section>
+
+      <!-- ACTIVIDADES -->
+      <section id="activities-view" style="display:none">
+        <div class="section-title">Tus entrenamientos</div>
+        <div id="activities-content"><div class="loading">Cargando…</div></div>
       </section>
 
       <!-- AJUSTES -->
@@ -69,12 +76,12 @@
 
     <nav>
       <button data-view="home" data-icon="home" class="active"><span class="ico"></span>Hoy</button>
-      <button data-view="progress" data-icon="chart"><span class="ico"></span>Progreso</button>
       <button data-view="horizon" data-icon="calendar"><span class="ico"></span>Plan</button>
+      <button data-view="activities" data-icon="bike"><span class="ico"></span>Actividades</button>
+      <button data-view="progress" data-icon="chart"><span class="ico"></span>Progreso</button>
       <button data-view="chat" data-icon="chat"><span class="ico"></span>Vikon</button>
-      <button data-view="settings" data-icon="settings"><span class="ico"></span>Ajustes</button>
     </nav>
   </div>
-  <script src="/static/app.js?v=12"></script>
+  <script src="/static/app.js?v=13"></script>
 </body>
 </html>

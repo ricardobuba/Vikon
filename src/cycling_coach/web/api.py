@@ -52,6 +52,7 @@ from cycling_coach.physiology import compute_ctl_atl_tsb
 from cycling_coach.planner.planner import PlannedSession
 from cycling_coach.planner.service import plan_horizon
 from cycling_coach.sync import SyncError, sync_recent
+from cycling_coach.twin.activity_service import list_activities
 from cycling_coach.twin.coherence_service import assess_cp_coherence, power_curve
 from cycling_coach.twin.load_service import daily_load_and_intensity, smoothed_cp_states
 
@@ -272,6 +273,21 @@ def create_app() -> FastAPI:
             out.append({"day": h.day.isoformat(), "ctl": round(h.ctl, 1),
                         "tsb": round(h.tsb, 1), "projected": True})
         return out
+
+    @app.get("/api/activities")
+    def activities(session: DB, aid: AID, limit: int = 30) -> list[dict[str, Any]]:
+        """Entrenamientos recientes con métricas + resumen en texto (determinista)."""
+        return [
+            {
+                "id": a.id, "day": a.day.isoformat(), "name": a.name, "sport": a.sport,
+                "minutes": a.minutes, "distance_km": a.distance_km,
+                "elevation_m": a.elevation_m, "avg_power_w": a.avg_power_w,
+                "np_w": a.np_w, "max_power_w": a.max_power_w, "avg_hr": a.avg_hr,
+                "kilojoules": a.kilojoules, "intensity": a.intensity, "tss": a.tss,
+                "text": a.text,
+            }
+            for a in list_activities(session, aid, limit=limit)
+        ]
 
     @app.get("/api/ftp")
     def ftp_history(session: DB, aid: AID) -> list[dict[str, Any]]:

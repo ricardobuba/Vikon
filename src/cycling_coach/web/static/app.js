@@ -89,17 +89,17 @@ function mountPowerChart(el, points, cp) {
 
   let grid = niceTicks(0, ymax, 4).map((v) => {
     const y = Y(v).toFixed(1);
-    return `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="#ffffff10"/>`
+    return `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="var(--grid)"/>`
       + `<text x="${mL - 5}" y="${(+y + 3).toFixed(1)}" fill="var(--muted)" font-size="9" text-anchor="end">${Math.round(v)}</text>`;
   }).join("");
   if (cp) {
     const y = Y(cp).toFixed(1);
-    grid += `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="#00D1B2" stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>`
-      + `<text x="${W - mR}" y="${(+y - 4).toFixed(1)}" fill="#00D1B2" font-size="9" text-anchor="end">CP ${Math.round(cp)}W</text>`;
+    grid += `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="#039C86" stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>`
+      + `<text x="${W - mR}" y="${(+y - 4).toFixed(1)}" fill="#039C86" font-size="9" text-anchor="end">CP ${Math.round(cp)}W</text>`;
   }
   const ticksX = [[5, "5s"], [30, "30s"], [60, "1m"], [300, "5m"], [1200, "20m"], [3600, "1h"]];
   const xlab = ticksX.filter(([s]) => s >= Math.min(...secs) && s <= Math.max(...secs)).map(([s, t]) =>
-    `<line x1="${X(s).toFixed(1)}" y1="${mT}" x2="${X(s).toFixed(1)}" y2="${mT + ih}" stroke="#ffffff08"/>`
+    `<line x1="${X(s).toFixed(1)}" y1="${mT}" x2="${X(s).toFixed(1)}" y2="${mT + ih}" stroke="var(--grid-soft)"/>`
     + `<text x="${X(s).toFixed(1)}" y="${H - 8}" fill="var(--muted)" font-size="9" text-anchor="middle">${t}</text>`).join("");
   const line = (key, color, dash) => {
     const pts = points.filter((p) => p[key] != null).map((p) => `${X(p.seconds).toFixed(1)},${Y(p[key]).toFixed(1)}`);
@@ -107,12 +107,12 @@ function mountPowerChart(el, points, cp) {
     return `<path d="M${pts.join(" L")}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" ${dash ? 'stroke-dasharray="5 3"' : ""}/>`;
   };
   const dots = points.filter((p) => p.actual != null).map((p) =>
-    `<circle cx="${X(p.seconds).toFixed(1)}" cy="${Y(p.actual).toFixed(1)}" r="2.6" fill="#2BC4FF"/>`).join("");
+    `<circle cx="${X(p.seconds).toFixed(1)}" cy="${Y(p.actual).toFixed(1)}" r="2.6" fill="#12A9E0"/>`).join("");
 
   el.innerHTML =
     `<div class="chart-wrap">
       <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
-        ${grid}${xlab}${line("predicted", "#2E7DFF", true)}${line("actual", "#2BC4FF", false)}${dots}
+        ${grid}${xlab}${line("predicted", "#1F6BEC", true)}${line("actual", "#12A9E0", false)}${dots}
         <g class="cross"></g>
         <rect x="${mL}" y="${mT}" width="${iw}" height="${ih}" fill="transparent" style="touch-action:none"/>
       </svg><div class="chart-tip" style="display:none"></div>
@@ -125,14 +125,14 @@ function mountPowerChart(el, points, cp) {
     let best = 0, bd = Infinity;
     points.forEach((p, i) => { const d = Math.abs(X(p.seconds) - vbx); if (d < bd) { bd = d; best = i; } });
     const p = points[best], cx = X(p.seconds).toFixed(1);
-    cross.innerHTML = `<line x1="${cx}" y1="${mT}" x2="${cx}" y2="${mT + ih}" stroke="#ffffff55"/>`
-      + (p.actual != null ? `<circle cx="${cx}" cy="${Y(p.actual).toFixed(1)}" r="3.5" fill="#2BC4FF" stroke="#0b0e14" stroke-width="1.5"/>` : "")
-      + (p.predicted != null ? `<circle cx="${cx}" cy="${Y(p.predicted).toFixed(1)}" r="3.5" fill="#2E7DFF" stroke="#0b0e14" stroke-width="1.5"/>` : "");
+    cross.innerHTML = `<line x1="${cx}" y1="${mT}" x2="${cx}" y2="${mT + ih}" stroke="var(--grid-strong)"/>`
+      + (p.actual != null ? `<circle cx="${cx}" cy="${Y(p.actual).toFixed(1)}" r="3.5" fill="#12A9E0" stroke="var(--card)" stroke-width="1.5"/>` : "")
+      + (p.predicted != null ? `<circle cx="${cx}" cy="${Y(p.predicted).toFixed(1)}" r="3.5" fill="#1F6BEC" stroke="var(--card)" stroke-width="1.5"/>` : "");
     tip.style.display = "block";
     tip.style.left = Math.max(15, Math.min(85, X(p.seconds) / W * 100)) + "%";
     tip.innerHTML = `<b>${fmtDur(p.seconds)}</b>`
-      + (p.actual != null ? `<span><i style="background:#2BC4FF"></i>real ${Math.round(p.actual)} W</span>` : "")
-      + (p.predicted != null ? `<span><i style="background:#2E7DFF"></i>modelo ${Math.round(p.predicted)} W</span>` : "");
+      + (p.actual != null ? `<span><i style="background:#12A9E0"></i>real ${Math.round(p.actual)} W</span>` : "")
+      + (p.predicted != null ? `<span><i style="background:#1F6BEC"></i>modelo ${Math.round(p.predicted)} W</span>` : "");
   };
   const hide = () => { cross.innerHTML = ""; tip.style.display = "none"; };
   svg.addEventListener("pointermove", (e) => move(e.clientX));
@@ -156,17 +156,17 @@ function mountChart(el, { dates, series, zeroLine = false, yunit = "", splitInde
 
   let grid = niceTicks(min, max, 4).map((v) => {
     const y = Y(v).toFixed(1);
-    return `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="#ffffff10"/>`
+    return `<line x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}" stroke="var(--grid)"/>`
       + `<text x="${mL - 5}" y="${(+y + 3).toFixed(1)}" fill="var(--muted)" font-size="9" text-anchor="end">${Math.round(v)}${yunit}</text>`;
   }).join("");
   if (zeroLine && min < 0 && max > 0) {
     const zy = Y(0).toFixed(1);
-    grid += `<line x1="${mL}" y1="${zy}" x2="${W - mR}" y2="${zy}" stroke="#ffffff40" stroke-dasharray="3 3"/>`;
+    grid += `<line x1="${mL}" y1="${zy}" x2="${W - mR}" y2="${zy}" stroke="var(--grid-strong)" stroke-dasharray="3 3"/>`;
   }
   // Línea "HOY" (frontera pasado/futuro)
   if (splitIndex != null && splitIndex < n - 1) {
     const sx = X(splitIndex).toFixed(1);
-    grid += `<line x1="${sx}" y1="${mT}" x2="${sx}" y2="${mT + ih}" stroke="#ffffff33" stroke-dasharray="2 3"/>`
+    grid += `<line x1="${sx}" y1="${mT}" x2="${sx}" y2="${mT + ih}" stroke="var(--grid-strong)" stroke-dasharray="2 3"/>`
       + `<text x="${sx}" y="${mT - 3}" fill="var(--muted)" font-size="9" text-anchor="middle">HOY</text>`;
   }
 
@@ -210,9 +210,9 @@ function mountChart(el, { dates, series, zeroLine = false, yunit = "", splitInde
     let i = Math.round((vbx - mL) / iw * (n - 1));
     i = Math.max(0, Math.min(n - 1, i));
     const cx = X(i).toFixed(1);
-    cross.innerHTML = `<line x1="${cx}" y1="${mT}" x2="${cx}" y2="${mT + ih}" stroke="#ffffff55"/>`
+    cross.innerHTML = `<line x1="${cx}" y1="${mT}" x2="${cx}" y2="${mT + ih}" stroke="var(--grid-strong)"/>`
       + series.map((s) => s.vals[i] == null ? "" :
-        `<circle cx="${cx}" cy="${Y(s.vals[i]).toFixed(1)}" r="3" fill="${s.color}" stroke="#0b0e14" stroke-width="1.5"/>`).join("");
+        `<circle cx="${cx}" cy="${Y(s.vals[i]).toFixed(1)}" r="3" fill="${s.color}" stroke="var(--card)" stroke-width="1.5"/>`).join("");
     tip.style.display = "block";
     tip.style.left = Math.max(15, Math.min(85, X(i) / W * 100)) + "%";
     tip.innerHTML = `<b>${dates[i] || ""}</b>` + series.map((s) => s.vals[i] == null ? "" :
@@ -260,6 +260,23 @@ function formGauge(s) {
   </div>`;
 }
 
+// "Por qué" del plan: el motor devuelve una frase con anotaciones entre
+// corchetes ([simulado: …], [ajuste por seguridad: …]). En vez de volcarla cruda
+// (quedaba fea), la partimos: frase principal + cada anotación como chip.
+function whyCard(rationale) {
+  if (!rationale) return "";
+  const notes = [...rationale.matchAll(/\[([^\]]+)\]/g)].map((m) => m[1].trim());
+  let main = rationale.replace(/\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim();
+  main = main.replace(/^Objetivo:\s*[\w_ ]+—\s*/i, "");        // ya se ve arriba
+  const chips = notes.map((n) => {
+    const [head, ...rest] = n.split(":");
+    const body = rest.join(":").trim();
+    return `<div class="why-note"><b>${head.trim()}</b>${body ? `<span>${body}</span>` : ""}</div>`;
+  }).join("");
+  return `<div class="card why"><h3>Por qué este entrenamiento</h3>
+    <p>${main}</p>${chips ? `<div class="why-notes">${chips}</div>` : ""}</div>`;
+}
+
 // --- Pantalla HOY -----------------------------------------------------------
 function renderHome(s) {
   const p = s.plan;
@@ -295,7 +312,7 @@ function renderHome(s) {
     ${formGauge(s)}
     ${goal}
     <div class="card"><h3>Forma y predicción</h3><div class="sub">Fitness (CTL) y frescura (TSB) · 60 días + próximos 7 (punteado). Toca la gráfica.</div><div id="form-svg" class="loading" style="padding:20px">…</div></div>
-    ${p ? `<div class="rationale">${p.rationale}</div>` : ""}`;
+    ${p ? whyCard(p.rationale) : ""}`;
   // gráfica de forma + predicción (interactiva)
   api("/api/form-forecast?past=60&future=7").then((t) => {
     if (!t.length) { $("#form-svg").innerHTML = `<div class="sub">sin datos</div>`; return; }
@@ -304,12 +321,65 @@ function renderHome(s) {
     mountChart($("#form-svg"), {
       dates: labelDates(t.map((d) => d.day)),
       series: [
-        { vals: t.map((d) => d.ctl), color: "#2BC4FF", name: "Fitness (CTL)", fill: true },
-        { vals: t.map((d) => d.tsb), color: "#2E7DFF", name: "Forma (TSB)" },
+        { vals: t.map((d) => d.ctl), color: "#12A9E0", name: "Fitness (CTL)", fill: true },
+        { vals: t.map((d) => d.tsb), color: "#1F6BEC", name: "Forma (TSB)" },
       ],
       zeroLine: true, splitIndex: split,
     });
   }).catch(() => { $("#form-svg").innerHTML = `<div class="sub">—</div>`; });
+}
+
+// --- Pantalla ACTIVIDADES ---------------------------------------------------
+const ZONE_OF_IF = (i) => (i == null ? "z2" : i < 0.60 ? "z1" : i < 0.76 ? "z2"
+  : i < 0.88 ? "z3" : i < 1.00 ? "z4" : "z5");
+
+function renderActivities(list) {
+  const box = $("#activities-content");
+  if (!list.length) { box.innerHTML = `<div class="loading">Aún no hay entrenamientos.</div>`; return; }
+  const dur = (m) => { const h = Math.floor(m / 60), mm = Math.round(m % 60); return h ? `${h}h ${String(mm).padStart(2, "0")}` : `${mm}min`; };
+  box.innerHTML = list.map((a, i) => {
+    const stat = (v, k, u = "") => v == null ? "" : `<div class="am"><b>${v}${u}</b><span>${k}</span></div>`;
+    return `<div class="acard" data-i="${i}">
+      <div class="ahead">
+        <span class="adot ${ZONE_OF_IF(a.intensity)}"></span>
+        <div class="atitle"><b>${a.name || "Entrenamiento"}</b>
+          <span>${new Date(a.day).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short" })}</span></div>
+        <span class="chev">${icon("chevron", 16)}</span>
+      </div>
+      <div class="amets">
+        ${stat(dur(a.minutes), "tiempo")}
+        ${stat(a.distance_km, "km")}
+        ${stat(a.np_w, "W norm.")}
+        ${stat(a.tss, "TSS")}
+      </div>
+      <div class="adetail" style="display:none">
+        <p class="atext">${a.text}</p>
+        <div class="amets sub2">
+          ${stat(a.avg_power_w, "W media")}
+          ${stat(a.max_power_w, "W máx")}
+          ${stat(a.avg_hr, "ppm")}
+          ${stat(a.elevation_m, "m desnivel")}
+          ${stat(a.intensity, "IF")}
+          ${stat(a.kilojoules, "kJ")}
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+  box.querySelectorAll(".acard").forEach((c) => {
+    c.querySelector(".ahead").addEventListener("click", () => {
+      const d = c.querySelector(".adetail");
+      const open = d.style.display !== "none";
+      d.style.display = open ? "none" : "block";
+      c.classList.toggle("open", !open);
+    });
+  });
+}
+
+let activitiesLoaded = false;
+async function loadActivities() {
+  if (activitiesLoaded) return;
+  try { renderActivities(await api("/api/activities?limit=30")); activitiesLoaded = true; }
+  catch (e) { $("#activities-content").innerHTML = `<div class="loading">${e.detail || "Error."}</div>`; }
 }
 
 // --- Pantalla PROGRESO ------------------------------------------------------
@@ -335,7 +405,7 @@ async function renderProgress() {
     html += `<div class="card"><h3>Curva de potencia</h3>
       <div class="sub">Tu mejor real (120 d) vs modelo CP/W' · toca la gráfica</div>
       <div id="pc-chart"></div>
-      ${legend([{ color: "#2BC4FF", label: "Real (potencia máx.)" }, { color: "#2E7DFF", label: "Modelo CP/W'" }])}
+      ${legend([{ color: "#12A9E0", label: "Real (potencia máx.)" }, { color: "#1F6BEC", label: "Modelo CP/W'" }])}
       ${pc.verdict ? `<div class="verdict ${pc.coherent ? "ok" : "warn"}">${pc.verdict}</div>` : ""}</div>`;
   }
   box.innerHTML = html || `<div class="loading">Sin datos de potencia todavía.</div>`;
@@ -447,7 +517,7 @@ async function renderSettings() {
         }),
       });
       $("#goal-msg").textContent = `Objetivo guardado (faltan ${r.days_to} días).`;
-      loadHome(); horizonLoaded = false;
+      loadHome(); horizonLoaded = false; activitiesLoaded = false;
       renderSettings();
     } catch (e) { $("#goal-msg").textContent = e.detail || "No se pudo guardar."; }
   });
@@ -460,7 +530,7 @@ async function renderSettings() {
       $("#sync-msg").textContent = r.new > 0
         ? `✓ ${r.new} nueva(s) actividad(es) importada(s).`
         : "✓ Ya estaba todo al día.";
-      if (r.new > 0) { loadHome(); horizonLoaded = false; renderSettings(); }
+      if (r.new > 0) { loadHome(); horizonLoaded = false; activitiesLoaded = false; renderSettings(); }
     } catch (e) { $("#sync-msg").textContent = e.detail || "No se pudo sincronizar (¿credenciales de Strava?)."; }
     finally { btn.disabled = false; }
   });
@@ -643,14 +713,17 @@ async function sendChat() {
 
 // --- Navegación -------------------------------------------------------------
 function show(view) {
-  ["home", "progress", "horizon", "chat", "settings"].forEach((v) => { $(`#${v}-view`).style.display = v === view ? "block" : "none"; });
+  ["home", "progress", "horizon", "activities", "chat", "settings"]
+    .forEach((v) => { $(`#${v}-view`).style.display = v === view ? "block" : "none"; });
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+  $("#gear").classList.toggle("active", view === "settings");
   const isChat = view === "chat";
   $("#chat-input").style.display = isChat ? "flex" : "none";
   $("#quick").style.display = isChat ? "flex" : "none";
   if (isChat) $("#chat-text").focus();
   if (view === "horizon") loadHorizon();
   if (view === "progress") renderProgress();
+  if (view === "activities") loadActivities();
   if (view === "settings") renderSettings();
 }
 
@@ -671,7 +744,7 @@ async function syncThenLoad() {
     const t = setTimeout(() => ctrl.abort(), 12000);
     const r = await api("/api/refresh", { method: "POST", signal: ctrl.signal });
     clearTimeout(t);
-    if (r.new > 0) { horizonLoaded = false; loadHome(); }   // datos nuevos → refresca
+    if (r.new > 0) { horizonLoaded = false; activitiesLoaded = false; loadHome(); }  // datos nuevos
   } catch (_) { /* sin conexión/credenciales/timeout: seguimos con lo cargado */ }
 }
 
@@ -679,6 +752,8 @@ async function syncThenLoad() {
 paintIcons();
 $("#today").textContent = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short" });
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => show(b.dataset.view)));
+$("#gear").innerHTML = icon("settings", 20);
+$("#gear").addEventListener("click", () => show("settings"));
 $("#chat-send").addEventListener("click", sendChat);
 $("#chat-text").addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
 document.querySelectorAll("#quick button").forEach((b) => b.addEventListener("click", () => {
