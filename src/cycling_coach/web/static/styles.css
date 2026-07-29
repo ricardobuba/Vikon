@@ -264,8 +264,24 @@ code { background: var(--card-2); border-radius: 5px; padding: 1px 6px; font-siz
 .avail { display: flex; flex-direction: column; gap: 6px; }
 .avail .row { display: flex; align-items: center; gap: 10px; }
 .avail .row .day { width: 42px; color: var(--muted); font-size: 13px; }
-.avail .row input { flex: 1; }
-.avail .row .u { color: var(--muted); font-size: 12px; width: 26px; }
+.avail .row input[type="range"] {
+  flex: 1; -webkit-appearance: none; appearance: none; height: 6px; padding: 0;
+  border: none; border-radius: 3px; background: var(--card-2); outline: none;
+}
+.avail .row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 20px; height: 20px;
+  border-radius: 50%; background: var(--grad); cursor: pointer;
+  box-shadow: 0 1px 4px rgba(23,32,47,.35);
+}
+.avail .row input[type="range"]::-moz-range-thumb {
+  width: 20px; height: 20px; border: none; border-radius: 50%;
+  background: var(--electric); cursor: pointer;
+}
+.avail .row .u {
+  color: var(--text); font-size: 12px; width: 46px; text-align: right;
+  font-family: 'Sora'; font-weight: 600;
+}
+.avail .row { padding: 3px 0; }
 .avail-total { margin-top: 10px; font-size: 13px; color: var(--muted); }
 .avail-total b { color: var(--cyan); font-family: 'Sora'; }
 

@@ -4,6 +4,12 @@ const api = (p, opts) => fetch(p, opts).then((r) => r.ok ? r.json() : r.json().t
 const fmt = (v, d = 0) => (v == null ? "—" : Number(v).toFixed(d));
 const signed = (v) => (v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(0));
 const shortDate = (iso) => new Date(iso).toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+// Duración en H:MM (formato único en toda la app). 95 → "1:35", 45 → "0:45".
+const hhmm = (min) => {
+  if (min == null) return "—";
+  const t = Math.round(Number(min));
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+};
 
 // --- Iconos SVG minimalistas (línea, heredan el color del texto) -------------
 const ICON = {
@@ -290,7 +296,7 @@ function renderHome(s) {
     <span class="goal-days">${s.days_to_event}<i>días</i></span>
   </div>`;
   const trained = s.trained_today
-    ? `<div class="pill-ok"><span class="pill-ic">${icon("check", 18)}</span>Ya entrenaste hoy · ${s.trained_minutes} min</div>` : "";
+    ? `<div class="pill-ok"><span class="pill-ic">${icon("check", 18)}</span>Ya entrenaste hoy · ${hhmm(s.trained_minutes)} h</div>` : "";
   const planLabel = s.trained_today ? "Mañana" : "Plan de hoy";
   let planHtml = `<div class="loading">No hay plan. Falta el FTP.</div>`;
   if (p) {
@@ -300,7 +306,7 @@ function renderHome(s) {
       <div class="hero"><div class="hero-inner">
         <div class="label">${planLabel}</div>
         <div class="session">${p.session}</div>
-        <div class="objective">${p.objective.replace("_", " ")} · <span class="duration">${p.minutes} min</span></div>
+        <div class="objective">${p.objective.replace("_", " ")} · <span class="duration">${hhmm(p.minutes)} h</span></div>
         ${adjust}<div class="blocks">${blocks}</div>
       </div></div>`;
   }
@@ -338,7 +344,6 @@ const ZONE_OF_IF = (i) => (i == null ? "z2" : i < 0.60 ? "z1" : i < 0.76 ? "z2"
 function renderActivities(list) {
   const box = $("#activities-content");
   if (!list.length) { box.innerHTML = `<div class="loading">Aún no hay entrenamientos.</div>`; return; }
-  const dur = (m) => { const h = Math.floor(m / 60), mm = Math.round(m % 60); return h ? `${h}h ${String(mm).padStart(2, "0")}` : `${mm}min`; };
   box.innerHTML = list.map((a, i) => {
     const stat = (v, k, u = "") => v == null ? "" : `<div class="am"><b>${v}${u}</b><span>${k}</span></div>`;
     return `<div class="acard" data-i="${i}">
@@ -349,7 +354,7 @@ function renderActivities(list) {
         <span class="chev">${icon("chevron", 16)}</span>
       </div>
       <div class="amets">
-        ${stat(dur(a.minutes), "tiempo")}
+        ${stat(hhmm(a.minutes), "tiempo")}
         ${stat(a.distance_km, "km")}
         ${stat(a.np_w, "W norm.")}
         ${stat(a.tss, "TSS")}
@@ -425,7 +430,7 @@ function renderHorizon(days) {
       ? h.targets.map(blockHtml).join("")
       : `<div class="empty">${h.objective === "rest"
           ? "Día de descanso — sin sesión."
-          : `${h.session} · ${h.minutes} min (reinicia el servidor para ver los bloques)`}</div>`;
+          : `${h.session} · ${hhmm(h.minutes)} h (reinicia el servidor para ver los bloques)`}</div>`;
     return `<div class="hitem">
       <div class="hrow"><span class="d">${d}</span>
         <span class="o">${h.objective.replace("_", " ")}<br><span style="color:var(--muted);font-size:12px">${h.session}</span></span>
@@ -587,10 +592,12 @@ const DAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 function profileFormHtml(p, onboarding) {
   const v = (x) => (x == null ? "" : x);
   const av = p.availability || {};
-  const days = DAYS.map((d, i) =>
-    `<div class="row"><span class="day">${d}</span>
-      <input type="number" min="0" max="600" step="5" id="av-${i}" value="${av[i] != null ? av[i] : ""}" placeholder="0" />
-      <span class="u">min</span></div>`).join("");
+  const days = DAYS.map((d, i) => {
+    const v = av[i] != null ? av[i] : 0;
+    return `<div class="row"><span class="day">${d}</span>
+      <input type="range" min="0" max="360" step="15" id="av-${i}" value="${v}" />
+      <span class="u" id="avl-${i}">${v ? hhmm(v) : "libre"}</span></div>`;
+  }).join("");
   const opt = (val, label) => `<option value="${val}"${p.level === val ? " selected" : ""}>${label}</option>`;
   return `
     <h2>${onboarding ? "Bienvenido a <span>Vikon</span>" : "Perfil y disponibilidad"}</h2>
@@ -633,9 +640,7 @@ function profileFormHtml(p, onboarding) {
     <div class="ob-sec">Disponibilidad semanal</div>
     <div class="lead" style="margin:-4px 2px 10px">Minutos que puedes entrenar cada día. Un día en 0 = descanso.</div>
     <div class="avail">${days}</div>
-    <div class="avail-total">Total semanal: <b id="av-sum">0</b> min
-      · objetivo <input type="number" id="wk-target" value="${v(p.weekly_minutes_target)}" placeholder="—"
-        style="width:70px;display:inline-block;padding:6px 8px" /> min</div>
+    <div class="avail-total">Total semanal: <b id="av-sum">0:00</b> h</div>
 
     <div class="ob-actions"><button id="pf-save">${onboarding ? "Empezar" : "Guardar"}</button></div>
     ${onboarding ? `<div class="ob-skip"><a id="pf-skip">Saltar por ahora</a></div>` : ""}
@@ -653,8 +658,12 @@ async function showProfile({ onboarding }) {
   window.scrollTo(0, 0);
   const recompute = () => {
     let sum = 0;
-    for (let i = 0; i < 7; i++) sum += Number($(`#av-${i}`).value || 0);
-    $("#av-sum").textContent = sum;
+    for (let i = 0; i < 7; i++) {
+      const v = Number($(`#av-${i}`).value || 0);
+      sum += v;
+      $(`#avl-${i}`).textContent = v ? hhmm(v) : "libre";
+    }
+    $("#av-sum").textContent = hhmm(sum);
   };
   for (let i = 0; i < 7; i++) $(`#av-${i}`).addEventListener("input", recompute);
   recompute();
@@ -671,7 +680,7 @@ async function submitProfile(onboarding) {
     name: str("#pf-name"), level: str("#pf-level"), declared_ftp_w: num("#pf-ftp"),
     sex: str("#pf-sex"), birthdate: str("#pf-birth"), height_cm: num("#pf-height"),
     weight_kg: num("#pf-weight"), hr_max: num("#pf-hrmax"), hr_rest: num("#pf-hrrest"),
-    weekly_minutes_target: num("#wk-target"), availability,
+    availability,
     goal_name: str("#pf-goal-name"), goal_date: str("#pf-goal-date"),
     goal_kind: str("#pf-goal-kind"), goal_priority: $("#pf-goal-prio").value || "A",
   };

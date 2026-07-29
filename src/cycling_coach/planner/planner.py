@@ -84,6 +84,10 @@ QUALITY_SPACING_DAYS = 4
 # Con esta disponibilidad o menos (días/semana), separar siempre la calidad
 # equivaldría a no entrenarla: se permite encadenar dos días duros.
 LOW_AVAILABILITY_DAYS = 4
+# Tener tiempo NO es tener que entrenar: aunque haya hueco los 7 días, el cuerpo
+# pide días LIBRES. Cadencia por defecto ~3 días de entreno + 1 de descanso (la
+# que sigue el dueño); al llegar a esta racha, el día suave pasa a descanso.
+MAX_DAYS_WITHOUT_REST = 3
 
 # --- Principio de RECUPERACIÓN: semana de descarga (deload) ------------------
 # Tras varias semanas encadenadas construyendo carga, una semana más suave
@@ -205,6 +209,14 @@ def count_build_weeks(ctl_series: list[float], max_weeks: int = 8) -> int:
         else:
             break
     return weeks
+
+
+def days_since_rest(recent: list[RecentDay]) -> int:
+    """Días seguidos entrenando (sin un día de carga 0) hasta hoy."""
+    for i, d in enumerate(reversed(recent)):
+        if d.tss <= 0:
+            return i
+    return len(recent)
 
 
 def days_since_quality(recent: list[RecentDay]) -> int:
@@ -721,7 +733,13 @@ def roll_horizon(
         # el "Z2 80' idéntico cada día" y banca forma para los días de calidad.
         if i >= 1 and plan.objective is Objective.endurance:
             since_long += 1
-            if since_long >= 6:
+            # El día LARGO se coloca donde más tiempo tienes (típicamente el
+            # finde): es donde cabe de verdad y donde más rinde el volumen.
+            big_day = (
+                daily_minutes is not None and md is not None
+                and md >= max(daily_minutes.values())
+            )
+            if since_long >= 6 or (big_day and since_long >= 3):
                 kind, since_long = "long", 0
             else:
                 kind = "short" if endur_n % 2 == 0 else "mid"
@@ -732,6 +750,31 @@ def roll_horizon(
                     plan, template=tmpl, targets=render_targets(tmpl, ftp),
                     rationale=plan.rationale + f" [variedad aeróbica: {kind}]",
                 )
+
+        # Día LIBRE semanal: tener hueco no obliga a entrenar. Si llevas muchos
+        # días seguidos sin descansar, el primer día suave pasa a descanso
+        # completo (es donde menos estímulo se pierde). No en semana de carrera:
+        # allí la descarga ya la maneja la fase.
+        streak = days_since_rest(recent)
+        is_big_day = (
+            daily_minutes is not None and md is not None
+            and md >= max(daily_minutes.values())
+        )
+        if phase is not Phase.race and (
+            # Toca descansar y NO es un día grande: gastar el descanso en el día
+            # de más tiempo (tu finde) sería tirarlo — mejor descansar entre
+            # semana y aprovechar el hueco largo para rodar.
+            (
+                streak >= MAX_DAYS_WITHOUT_REST
+                and not is_big_day
+                and INTENSITY_RANK[plan.objective] <= INTENSITY_RANK[Objective.recovery]
+            )
+            # Tope duro: por muchos días grandes que vengan, no se encadena más.
+            or streak >= MAX_DAYS_WITHOUT_REST + 3
+        ):
+            plan = rest_session(
+                ftp, f"día libre: {streak} días seguidos entrenando"
+            )
 
         # Semana de descarga: la sesión se recorta al PRESUPUESTO restante,
         # repartido entre los días que quedan. Se conserva el TIPO de sesión

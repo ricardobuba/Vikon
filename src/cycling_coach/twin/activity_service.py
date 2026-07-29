@@ -54,8 +54,9 @@ class ActivitySummary:
 
 
 def _fmt_dur(minutes: float) -> str:
+    """Duración en H:MM (formato único en toda la app)."""
     h, m = divmod(int(round(minutes)), 60)
-    return f"{h}h {m:02d}min" if h else f"{m} min"
+    return f"{h}:{m:02d} h"
 
 
 def _summarize(a: Activity, ftp: float | None, minutes: float,

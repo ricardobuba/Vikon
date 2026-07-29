@@ -115,10 +115,11 @@ def _steady(
     blocks.append(Block("steady", minutes, low, high))
     if cooldown:
         blocks.append(Block("cooldown", cooldown, 55, 60))
+    total = int(minutes + warmup + cooldown)
     return WorkoutTemplate(
-        id=f"{objective.value}-{int(minutes + warmup + cooldown)}",
+        id=f"{objective.value}-{total}",
         objective=objective,
-        name=f"{label} {int(minutes + warmup + cooldown)}'",
+        name=f"{label} {total // 60}:{total % 60:02d}",
         blocks=blocks,
         description=f"{label}: {int(minutes)}' continuos a {int(low)}–{int(high)}% FTP.",
     )
