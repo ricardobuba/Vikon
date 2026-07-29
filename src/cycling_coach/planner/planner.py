@@ -598,6 +598,7 @@ def roll_horizon(
     days_to_event: int | None = None,
     minutes: float | None = None,
     daily_minutes: dict[int, int] | None = None,
+    date_minutes: dict[date, int] | None = None,
     event_kind: str | None = None,
 ) -> list[HorizonDay]:
     """Proyecta `days` días encadenando `plan_session` y ARRASTRANDO el estado
@@ -607,7 +608,8 @@ def roll_horizon(
 
     `daily_minutes` (weekday 0=lunes → minutos) encaja cada día en TU
     disponibilidad; un día con 0 minutos se planifica como descanso. Si no se da,
-    se usa `minutes` para todos.
+    se usa `minutes` para todos. `date_minutes` (fecha → minutos) son EXCEPCIONES
+    puntuales ("el sábado 9 no puedo") y mandan sobre la semanal.
 
     Solo el día 0 se compromete; el resto es una proyección que se re-planifica
     al llegar datos reales (de ahí "deslizante"). La CRI es una señal de HOY: no
@@ -630,8 +632,11 @@ def roll_horizon(
         dte = (days_to_event - i) if days_to_event is not None else None
         phase = phase_for(dte)
 
-        # Minutos disponibles ese día (por día de la semana) → 0 = descanso.
+        # Minutos disponibles ese día: manda la EXCEPCIÓN puntual de esa fecha,
+        # si no la semanal por día, si no el tope general. 0 = descanso.
         md = daily_minutes.get(day.weekday(), minutes) if daily_minutes else minutes
+        if date_minutes and day in date_minutes:
+            md = date_minutes[day]
         if md is not None and md <= 0:
             plan = rest_session(ftp, "descanso: sin disponibilidad ese día")
             out.append(HorizonDay(day, tsb, ctl, atl, phase, plan, 0.0))

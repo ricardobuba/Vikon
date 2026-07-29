@@ -292,6 +292,40 @@ class Availability(Base):
     minutes: Mapped[int] = mapped_column(Integer)
 
 
+class AvailabilityOverride(Base):
+    """Disponibilidad de un DÍA CONCRETO (excepción puntual): "el sábado 9 no
+    puedo", "mañana solo 30 min". Manda sobre la disponibilidad semanal."""
+
+    __tablename__ = "availability_override"
+    __table_args__ = (
+        UniqueConstraint("athlete_id", "day", name="uq_athlete_avail_day"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    athlete_id: Mapped[int] = mapped_column(
+        ForeignKey("athlete.id", ondelete="CASCADE"), index=True
+    )
+    day: Mapped[date] = mapped_column(Date, index=True)
+    minutes: Mapped[int] = mapped_column(Integer)
+
+
+class ChatMessage(Base):
+    """Historial del chat con Vikon (memoria de ~1 semana). Persistirlo hace que
+    la conversación sobreviva a reinicios del servidor y a cambiar de móvil."""
+
+    __tablename__ = "chat_message"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    athlete_id: Mapped[int] = mapped_column(
+        ForeignKey("athlete.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(16))       # user | assistant
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class DailyMetric(Base):
     """Métrica diaria (capa `daily` del gemelo): sueño, HRV, FC reposo, CTL..."""
 

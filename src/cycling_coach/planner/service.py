@@ -4,12 +4,13 @@ produce la sesión recomendada de hoy."""
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
 from cycling_coach.db.repositories import (
     get_availability,
+    get_availability_overrides,
     latest_parameter_estimate,
     next_goal,
 )
@@ -52,6 +53,10 @@ def plan_today(
     avail = get_availability(session, athlete_id)
     if avail and as_of.weekday() in avail:
         minutes = avail[as_of.weekday()]
+    # Excepción puntual de ESE día (manda sobre la semanal).
+    over = get_availability_overrides(session, athlete_id, as_of, as_of)
+    if as_of in over:
+        minutes = over[as_of]
     if minutes is not None and minutes <= 0:
         return rest_session(ftp, "descanso: tu disponibilidad de hoy es 0 min")
 
@@ -113,8 +118,12 @@ def plan_horizon(
     days_to_event = (goal.event_date - as_of).days if goal else None
 
     avail = get_availability(session, athlete_id)
+    overrides = get_availability_overrides(
+        session, athlete_id, as_of, as_of + timedelta(days=days)
+    )
     return roll_horizon(
         ftp=ftp, ctl=current.ctl, atl=current.atl, context=ctx, cri=cri,
         days=days, start=as_of, days_to_event=days_to_event, minutes=minutes,
-        daily_minutes=avail or None, event_kind=goal.kind if goal else None,
+        daily_minutes=avail or None, date_minutes=overrides or None,
+        event_kind=goal.kind if goal else None,
     )

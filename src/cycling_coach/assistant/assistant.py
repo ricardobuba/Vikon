@@ -7,7 +7,7 @@ respuesta). La decisión —qué entrenar— siempre la toma el motor con la fic
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -15,10 +15,14 @@ from cycling_coach.assistant.grounding import Facts, gather_facts
 from cycling_coach.assistant.llm import LLMClient, LLMError
 from cycling_coach.assistant.prompts import EXPLAIN_SYSTEM, INTENT_SYSTEM, explain_user
 from cycling_coach.db.repositories import (
+    add_chat_messages,
     find_activity_on_date,
     latest_power_activity,
+    purge_old_chat,
+    recent_chat,
     save_profile,
     set_availability,
+    set_availability_override,
     store_parameter_estimate,
     upsert_daily_metric,
 )
@@ -72,8 +76,13 @@ _PROFILE_LABEL = {
     "weekly_minutes_target": "objetivo semanal {:.0f} min",
     "level": "nivel {}",
     "availability": "disponibilidad {}",
+    "day_off": "disponibilidad puntual {}",
 }
 _LEVELS = {"principiante", "intermedio", "avanzado", "elite"}
+# Memoria del chat: Vikon recuerda ~1 semana de conversación (persistida en BD,
+# sobrevive a reinicios). Al prompt solo van los últimos mensajes (coste/latencia).
+CHAT_MEMORY_DAYS = 7
+CHAT_CONTEXT_MESSAGES = 20
 _DAY_MINUTES_MAX = 600.0
 _DAY_NAMES = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
 
@@ -87,6 +96,7 @@ class Intent:
     log: dict[str, float] = field(default_factory=dict)   # datos a registrar
     profile: dict = field(default_factory=dict)           # datos permanentes
     activity: dict = field(default_factory=dict)          # corrección de un entreno
+    day_off: dict = field(default_factory=dict)           # disponibilidad de un día suelto
 
     @property
     def cri_override(self) -> float | None:
@@ -198,12 +208,37 @@ def apply_activity(session: Session, athlete_id: int, act: dict, today: date) ->
     return applied
 
 
+def apply_day_off(session: Session, athlete_id: int, spec: dict, today: date) -> dict:
+    """Disponibilidad de un DÍA CONCRETO (excepción puntual). Manda sobre la
+    disponibilidad semanal solo para esa fecha."""
+    raw, mins = spec.get("date"), spec.get("minutes")
+    if not isinstance(mins, int | float) or isinstance(mins, bool):
+        return {}
+    if not 0 <= mins <= _DAY_MINUTES_MAX:
+        return {}
+    if raw == "today":
+        day = today
+    elif raw == "tomorrow":
+        day = today + timedelta(days=1)
+    else:
+        try:
+            day = date.fromisoformat(str(raw))
+        except (TypeError, ValueError):
+            return {}
+    set_availability_override(session, athlete_id, day, int(mins))
+    return {"day": day.isoformat(), "minutes": int(mins)}
+
+
 def _apply_changes(
     session: Session, athlete_id: int, intent: Intent, today: date
 ) -> tuple[dict, dict] | None:
     """Aplica los cambios de perfil/entreno pedidos. None si no hubo ninguno."""
     prof = apply_profile(session, athlete_id, intent.profile) if intent.profile else {}
     act = apply_activity(session, athlete_id, intent.activity, today) if intent.activity else {}
+    if intent.day_off:
+        off = apply_day_off(session, athlete_id, intent.day_off, today)
+        if off:
+            prof = {**prof, "day_off": f"{off['day']}: {off['minutes']} min"}
     return (prof, act) if (prof or act) else None
 
 
@@ -253,6 +288,7 @@ def parse_intent(llm: LLMClient, message: str) -> Intent:
 
     prof = data.get("profile")
     act = data.get("activity")
+    dayoff = data.get("day_off")
     return Intent(
         kind=kind if kind in ("question", "log") else "plan",
         minutes=float(minutes) if isinstance(minutes, int | float) else None,
@@ -261,6 +297,7 @@ def parse_intent(llm: LLMClient, message: str) -> Intent:
         log=log,
         profile=prof if isinstance(prof, dict) else {},
         activity=act if isinstance(act, dict) else {},
+        day_off=dayoff if isinstance(dayoff, dict) else {},
     )
 
 
@@ -326,8 +363,21 @@ class ChatSession:
     minutes: float | None = None
     readiness: str | None = None
     history: list[dict[str, str]] = field(default_factory=list)
+    memory_days: int = CHAT_MEMORY_DAYS   # cuánto recuerda Vikon
+    _loaded: bool = False
+
+    def load_memory(self, session: Session) -> None:
+        """Carga el historial reciente de la BD (memoria entre reinicios) y poda
+        lo más viejo que la ventana de retención."""
+        if self._loaded or session is None:
+            return
+        since = datetime.now(UTC) - timedelta(days=self.memory_days)
+        purge_old_chat(session, self.athlete_id, since)
+        self.history = recent_chat(session, self.athlete_id, since)
+        self._loaded = True
 
     def turn(self, session: Session, message: str) -> Reply:
+        self.load_memory(session)
         intent = parse_intent(self.llm, message)
         if intent.minutes is not None:
             self.minutes = intent.minutes
@@ -357,7 +407,12 @@ class ChatSession:
 
         self.history.append({"role": "user", "content": message})
         self.history.append({"role": "assistant", "content": text})
-        self.history = self.history[-12:]        # acota el contexto (6 turnos)
+        self.history = self.history[-CHAT_CONTEXT_MESSAGES:]   # acota el prompt
+        if session is not None:
+            add_chat_messages(
+                session, self.athlete_id,
+                [("user", message), ("assistant", text)],
+            )
         return Reply(
             text=text,
             intent=Intent(

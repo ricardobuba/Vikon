@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from cycling_coach.db.repositories import (
     get_availability,
+    get_availability_overrides,
     latest_parameter_estimate,
     next_goal,
     training_seconds_on,
@@ -201,6 +202,11 @@ def gather_facts(
         day_min = minutes
         if avail and plan_date.weekday() in avail:
             day_min = avail[plan_date.weekday()]
+        overrides = get_availability_overrides(
+            session, athlete_id, plan_date, plan_date + timedelta(days=7)
+        )
+        if plan_date in overrides:
+            day_min = overrides[plan_date]
         if ctx is not None:
             ctx = replace(
                 ctx,
@@ -231,7 +237,8 @@ def gather_facts(
                 ftp=facts.ftp, ctl=current.ctl, atl=current.atl, context=ctx,
                 cri=cri, days=7, start=plan_date,
                 days_to_event=facts.days_to_event, minutes=minutes,
-                daily_minutes=avail or None, event_kind=event_kind,
+                daily_minutes=avail or None, date_minutes=overrides or None,
+                event_kind=event_kind,
             )
         ]
     return facts

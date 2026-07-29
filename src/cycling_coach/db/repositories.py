@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,8 @@ from cycling_coach.db.models import (
     AppMeta,
     Athlete,
     Availability,
+    AvailabilityOverride,
+    ChatMessage,
     DailyMetric,
     Goal,
     ModelConfig,
@@ -511,6 +513,75 @@ def get_or_create_secret(session: Session) -> str:
     session.add(AppMeta(key="auth_secret", value=value))
     session.flush()
     return value
+
+
+# --- Disponibilidad de días sueltos (excepciones puntuales) ------------------
+def get_availability_overrides(
+    session: Session, athlete_id: int, start: date, end: date
+) -> dict[date, int]:
+    """{fecha → minutos} de las excepciones puntuales en [start, end]."""
+    rows = session.execute(
+        select(AvailabilityOverride.day, AvailabilityOverride.minutes).where(
+            AvailabilityOverride.athlete_id == athlete_id,
+            AvailabilityOverride.day >= start,
+            AvailabilityOverride.day <= end,
+        )
+    ).all()
+    return {d: m for d, m in rows}
+
+
+def set_availability_override(
+    session: Session, athlete_id: int, day: date, minutes: int
+) -> None:
+    """Fija (o actualiza) los minutos disponibles de un día concreto."""
+    stmt = insert(AvailabilityOverride).values(
+        athlete_id=athlete_id, day=day, minutes=int(minutes)
+    )
+    session.execute(stmt.on_conflict_do_update(
+        index_elements=["athlete_id", "day"], set_={"minutes": int(minutes)},
+    ))
+
+
+def clear_availability_override(session: Session, athlete_id: int, day: date) -> None:
+    """Quita la excepción de ese día (vuelve a mandar la semanal)."""
+    session.execute(
+        delete(AvailabilityOverride).where(
+            AvailabilityOverride.athlete_id == athlete_id,
+            AvailabilityOverride.day == day,
+        )
+    )
+
+
+# --- Memoria del chat (~1 semana) --------------------------------------------
+def add_chat_messages(
+    session: Session, athlete_id: int, messages: list[tuple[str, str]]
+) -> None:
+    """Guarda [(rol, texto)] en el historial."""
+    for role, content in messages:
+        session.add(ChatMessage(athlete_id=athlete_id, role=role, content=content))
+    session.flush()
+
+
+def recent_chat(
+    session: Session, athlete_id: int, since: datetime, limit: int = 40
+) -> list[dict[str, str]]:
+    """Historial reciente en formato de mensajes del LLM (viejo→nuevo)."""
+    rows = session.execute(
+        select(ChatMessage)
+        .where(ChatMessage.athlete_id == athlete_id, ChatMessage.created_at >= since)
+        .order_by(ChatMessage.created_at.desc())
+        .limit(limit)
+    ).scalars().all()
+    return [{"role": m.role, "content": m.content} for m in reversed(rows)]
+
+
+def purge_old_chat(session: Session, athlete_id: int, before: datetime) -> None:
+    """Borra el historial anterior a `before` (retención de ~1 semana)."""
+    session.execute(
+        delete(ChatMessage).where(
+            ChatMessage.athlete_id == athlete_id, ChatMessage.created_at < before
+        )
+    )
 
 
 def activity_exists(session: Session, provider: str, provider_activity_id: str) -> bool:
