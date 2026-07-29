@@ -782,6 +782,13 @@ def create_app() -> FastAPI:
                 headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-store"},
             )
 
+        @app.get("/favicon.ico", include_in_schema=False)
+        def favicon() -> FileResponse:
+            """Los navegadores piden /favicon.ico en la raíz aunque el HTML
+            declare otra ruta; sin esto se llevan un 404 y pintan el icono
+            genérico."""
+            return FileResponse(_STATIC / "favicon.ico", media_type="image/x-icon")
+
     return app
 
 

@@ -2,11 +2,13 @@
  * Estrategia deliberada: NADA de cachear la API (los datos de entrenamiento
  * deben ser siempre frescos; una respuesta vieja daría un plan equivocado).
  * Solo cachea el "armazón" (HTML/CSS/JS/iconos) para que la app abra al
- * instante y muestre algo aunque no haya red. */
-const CACHE = "vikon-shell-v21";
+ * instante y muestre algo aunque no haya red.
+ * OJO: al cambiar assets hay que subir la versión AQUÍ y en index.html. */
+const CACHE = "vikon-shell-v23";
 const SHELL = [
-  "/", "/static/styles.css?v=21", "/static/app.js?v=21",
-  "/static/logo.png", "/static/isotipo.png", "/static/manifest.webmanifest",
+  "/", "/static/styles.css?v=23", "/static/app.js?v=23",
+  "/static/logo.png", "/static/manifest.webmanifest",
+  "/static/icon-192.png?v=23", "/static/favicon.ico?v=23",
 ];
 
 self.addEventListener("install", (e) => {
