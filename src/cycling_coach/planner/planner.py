@@ -81,6 +81,11 @@ QUALITY_INTENSITY = 0.85
 # en fatiga extrema, se fuerza un día de calidad (≈1-2/semana, cadencia
 # polarizada estándar). No aplica en semana de carrera. Ajustable.
 QUALITY_SPACING_DAYS = 4
+# Con esta disponibilidad o menos (días/semana), separar siempre la calidad
+# equivaldría a no entrenarla: se permite encadenar dos días duros.
+LOW_AVAILABILITY_DAYS = 4
+# Eventos cuya especificidad pide rendir en días consecutivos (bloques).
+STACKING_EVENTS = {"vuelta_etapas", "gran_fondo"}
 
 
 @dataclass
@@ -111,12 +116,39 @@ class TrainingContext:
     fitness_pct: float | None = None     # percentil del CTL actual (0–1)
     ctl_window: list[float] = field(default_factory=list)    # últimos ~8 CTL (viejo→hoy)
     days_since_quality: int | None = None  # días desde la última sesión de intensidad
+    available_days: int | None = None    # días/semana con tiempo para entrenar
+    stack_hard: bool = False             # el evento pide días duros encadenados
 
     def yesterday_hard(self) -> bool:
         return bool(self.recent) and self.recent[-1].is_hard
 
+    def two_hard_in_a_row(self) -> bool:
+        """¿Los DOS últimos días fueron duros? Encadenar 3 no lo permitimos nunca."""
+        return len(self.recent) >= 2 and self.recent[-1].is_hard and self.recent[-2].is_hard
+
     def hard_days_last_week(self) -> int:
         return sum(1 for d in self.recent[-7:] if d.is_hard)
+
+    def allows_back_to_back(self) -> bool:
+        """¿Se permite un segundo día duro seguido?
+
+        La regla duro/fácil es una GUÍA, no una ley: hay dos casos donde
+        encadenar es lo correcto y prohibirlo haría daño:
+        - POCA DISPONIBILIDAD: si solo entrenas 2-3 días (p. ej. fin de semana),
+          separar siempre la calidad significa no meterla nunca.
+        - ESPECIFICIDAD del evento: pruebas por etapas o fines de semana de
+          carrera exigen rendir en días consecutivos; entrenarlo es específico
+          (bloques de carga).
+        Nunca se encadena un TERCER día duro, y siguen mandando los frenos
+        fisiológicos: suelo de forma (simulación), ACWR, ramp y tope semanal."""
+        if self.two_hard_in_a_row():
+            return False
+        if self.stack_hard:
+            return True
+        return (
+            self.available_days is not None
+            and self.available_days <= LOW_AVAILABILITY_DAYS
+        )
 
 
 # Menú de calidad por tipo de evento: una MEZCLA que rota (no un único objetivo).
@@ -302,7 +334,11 @@ def apply_constraints(
 
     Los cortes son heurísticos con base en la literatura (regla duro/fácil,
     ≤3 días de calidad/semana, ACWR 0.8–1.3, ramp seguro 3–8 CTL/sem), no
-    validados con tus resultados. La validación fina es la grieta 3."""
+    validados con tus resultados. La validación fina es la grieta 3.
+
+    La regla duro/fácil NO es absoluta: con poca disponibilidad o si el evento
+    pide días consecutivos, se permite encadenar dos duros (nunca tres) — ver
+    `TrainingContext.allows_back_to_back`."""
     rank = INTENSITY_RANK[desired]
     end = INTENSITY_RANK[Objective.endurance]
     ss = INTENSITY_RANK[Objective.sweet_spot]
@@ -310,7 +346,7 @@ def apply_constraints(
 
     # (techo, motivo) de cada guarda que se activa.
     guards: list[tuple[int, str]] = []
-    if ctx.yesterday_hard():
+    if ctx.yesterday_hard() and not ctx.allows_back_to_back():
         guards.append((end, "ayer fue día duro (regla duro/fácil)"))
     hd = ctx.hard_days_last_week()
     if hd >= MAX_HARD_PER_WEEK:
@@ -421,7 +457,7 @@ def plan_session(
         and context.days_since_quality >= QUALITY_SPACING_DAYS
         and INTENSITY_RANK[objective] < INTENSITY_RANK[Objective.sweet_spot]
         and (tsb is None or tsb >= (thresholds or FormThresholds()).recovery_below)
-        and not context.yesterday_hard()
+        and (not context.yesterday_hard() or context.allows_back_to_back())
         and context.hard_days_last_week() < MAX_HARD_PER_WEEK
         and phase is not Phase.race
     ):
@@ -607,9 +643,15 @@ def roll_horizon(
 
         ramp = ctl - window[-8] if len(window) >= 8 else context.ramp_rate
         acwr = (atl / ctl) if ctl > 0 else None
+        avail_days = (
+            sum(1 for v in daily_minutes.values() if v > 0) if daily_minutes
+            else context.available_days
+        )
         day_ctx = replace(
             context, recent=recent[-14:], ramp_rate=ramp, acwr=acwr,
             days_since_quality=days_since_quality(recent),
+            available_days=avail_days,
+            stack_hard=(event_kind in STACKING_EVENTS),
         )
         plan = plan_session(
             ftp=ftp, tsb=tsb, ctl=ctl, atl=atl,

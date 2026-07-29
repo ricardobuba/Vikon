@@ -6,7 +6,7 @@ aquí, el asistente no puede afirmarlo. Se construye con el motor determinista.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
@@ -18,6 +18,7 @@ from cycling_coach.db.repositories import (
     training_seconds_on,
 )
 from cycling_coach.planner.planner import (
+    STACKING_EVENTS,
     FormThresholds,
     PlannedSession,
     phase_for,
@@ -200,6 +201,12 @@ def gather_facts(
         day_min = minutes
         if avail and plan_date.weekday() in avail:
             day_min = avail[plan_date.weekday()]
+        if ctx is not None:
+            ctx = replace(
+                ctx,
+                available_days=(sum(1 for v in avail.values() if v > 0) if avail else None),
+                stack_hard=bool(goal and goal.kind in STACKING_EVENTS),
+            )
         if day_min is not None and day_min <= 0:
             facts.plan = rest_session(
                 facts.ftp, "descanso: tu disponibilidad de ese día es 0 min"

@@ -3,6 +3,7 @@ produce la sesión recomendada de hoy."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from cycling_coach.db.repositories import (
     next_goal,
 )
 from cycling_coach.planner.planner import (
+    STACKING_EVENTS,
     HorizonDay,
     PlannedSession,
     phase_for,
@@ -69,6 +71,15 @@ def plan_today(
     goal = next_goal(session, athlete_id, as_of)
     days_to_event = (goal.event_date - as_of).days if goal else None
     phase = phase_for(days_to_event)
+
+    # La regla duro/fácil se relaja si entrenas pocos días o el evento pide
+    # bloques (días consecutivos) — ver TrainingContext.allows_back_to_back.
+    if ctx is not None:
+        ctx = replace(
+            ctx,
+            available_days=(sum(1 for v in avail.values() if v > 0) if avail else None),
+            stack_hard=bool(goal and goal.kind in STACKING_EVENTS),
+        )
 
     return plan_session(
         ftp=ftp, tsb=tsb, ctl=ctl, atl=atl, cri=cri, context=ctx,

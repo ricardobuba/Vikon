@@ -18,6 +18,7 @@ from cycling_coach.planner import (
     roll_horizon,
 )
 from cycling_coach.planner.library import LIBRARY, Objective, select_template
+from cycling_coach.planner.planner import INTENSITY_RANK
 from cycling_coach.planner.simulator import session_intensity
 
 _HARD = {Objective.sweet_spot, Objective.threshold, Objective.vo2max}
@@ -379,3 +380,44 @@ def test_horizon_emphasis_depends_on_event_kind():
     assert Objective.vo2max not in fondo                   # gran fondo: sin VO2
     # Todos conservan la base aeróbica (la resistencia no se sacrifica).
     assert Objective.endurance in crit and Objective.endurance in fondo
+
+
+# --- Duro/fácil es una GUÍA, no una ley -------------------------------------
+def _hard_yday() -> list[RecentDay]:
+    return [RecentDay(date(2026, 7, 25), 90.0, 0.95)]      # ayer, duro
+
+
+def test_hard_easy_blocks_by_default():
+    # Con disponibilidad amplia y sin evento de bloques, tras un día duro se baja.
+    ctx = TrainingContext(recent=_hard_yday(), available_days=6)
+    obj, why = apply_constraints(Objective.threshold, ctx)
+    assert obj is Objective.endurance and "duro/fácil" in why
+
+
+def test_low_availability_allows_back_to_back():
+    # Si solo entrenas 3 días, separar siempre la calidad = no entrenarla nunca.
+    ctx = TrainingContext(recent=_hard_yday(), available_days=3)
+    obj, why = apply_constraints(Objective.threshold, ctx)
+    assert obj is Objective.threshold and why is None
+
+
+def test_event_specificity_allows_back_to_back():
+    # Eventos que exigen rendir en días consecutivos (bloques).
+    ctx = TrainingContext(recent=_hard_yday(), available_days=6, stack_hard=True)
+    obj, _ = apply_constraints(Objective.threshold, ctx)
+    assert obj is Objective.threshold
+
+
+def test_never_three_hard_in_a_row():
+    # Dos duros seguidos ya es el límite: el tercero SIEMPRE se rebaja.
+    two = [
+        RecentDay(date(2026, 7, 24), 90.0, 0.95),
+        RecentDay(date(2026, 7, 25), 90.0, 0.95),
+    ]
+    for ctx in (
+        TrainingContext(recent=two, available_days=2),
+        TrainingContext(recent=two, available_days=2, stack_hard=True),
+    ):
+        assert ctx.allows_back_to_back() is False
+        obj, _ = apply_constraints(Objective.threshold, ctx)
+        assert INTENSITY_RANK[obj] < INTENSITY_RANK[Objective.sweet_spot]
