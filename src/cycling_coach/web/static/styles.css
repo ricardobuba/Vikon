@@ -444,3 +444,35 @@ nav button, .block, .hrow, .stat { transition: color .2s, background .2s, transf
 .irow b { font-family: 'Sora'; width: 52px; }
 .irow .ipct { margin-left: auto; color: var(--coral); font-family: 'Sora'; font-weight: 600; }
 .hrow .hdur { font-family: 'Sora'; color: var(--text); font-size: 13px; }
+
+/* --- Detalle del día en el Plan: info + ajustes de ese día --- */
+.hdesc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 10px; }
+.hstats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.hstats .hs { background: var(--card); border-radius: 10px; padding: 8px 6px; text-align: center; }
+.hstats .hs b { display: block; font-family: 'Sora'; font-size: 14px; }
+.hstats .hs span { font-size: 10px; color: var(--muted); }
+.hwhy { margin-top: 10px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.hwhy b { color: var(--text); }
+
+.dayctl { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.dayrow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 12px; }
+.dayrow > span { width: 96px; color: var(--muted); }
+.dayrow input[type="range"] {
+  flex: 1; -webkit-appearance: none; appearance: none; height: 6px;
+  border-radius: 3px; background: var(--card); outline: none;
+}
+.dayrow input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--grad); cursor: pointer;
+}
+.dayrow .dminl { width: 46px; text-align: right; font-family: 'Sora'; }
+.dayrow select {
+  flex: 1; background: var(--card); border: 1px solid var(--border); color: var(--text);
+  border-radius: 9px; padding: 8px 10px; font-size: 13px; font-family: inherit;
+}
+.dsave {
+  width: 100%; border: none; background: var(--grad); color: #fff; font-weight: 700;
+  border-radius: 10px; padding: 10px; font-size: 13px; cursor: pointer; font-family: inherit;
+}
+.dsave:disabled { opacity: .6; }
+.dmsg { display: block; text-align: center; font-size: 12px; color: var(--muted); margin-top: 6px; }

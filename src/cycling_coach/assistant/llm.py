@@ -8,6 +8,7 @@ Ollama y Anthropic. Cambiar de proveedor = cambiar base_url/api_key/model en el
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import httpx
@@ -94,6 +95,51 @@ class LLMClient:
             return resp.json()["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, ValueError) as exc:
             raise LLMError(f"Respuesta del LLM inesperada: {resp.text[:300]}") from exc
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float | None = None,
+    ) -> Iterator[str]:
+        """Igual que `chat` pero devuelve los TROZOS según llegan (SSE), para
+        que la respuesta se vea escribirse en vez de aparecer de golpe.
+
+        Formato OpenAI-compatible: líneas `data: {json}` y `data: [DONE]`."""
+        payload: dict = {
+            "model": self.model,
+            "temperature": self.temperature if temperature is None else temperature,
+            "messages": messages,
+            "stream": True,
+        }
+        try:
+            with httpx.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(),
+                json=payload,
+                timeout=self.timeout,
+            ) as resp:
+                if resp.status_code != 200:
+                    resp.read()
+                    raise LLMError(
+                        f"El LLM respondió {resp.status_code}: {resp.text[:300]}"
+                    )
+                for line in resp.iter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        delta = json.loads(data)["choices"][0].get("delta", {})
+                    except (KeyError, IndexError, ValueError):
+                        continue          # trozo raro: seguimos con el siguiente
+                    piece = delta.get("content")
+                    if piece:
+                        yield piece
+        except httpx.HTTPError as exc:
+            raise LLMError(f"No pude contactar al LLM: {exc}") from exc
 
     def extract_json(self, system: str, user: str) -> dict:
         """Como `complete` pero parsea la respuesta como JSON (tolerante a que el

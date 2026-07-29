@@ -443,32 +443,89 @@ async function renderProgress() {
   if (pc) mountPowerChart($("#pc-chart"), pc.points, pc.cp);
 }
 
+const OBJECTIVES = [
+  ["auto", "Que decida Vikon"], ["rest", "Descanso"], ["recovery", "Recuperación"],
+  ["endurance", "Resistencia (Z2)"], ["sweet_spot", "Sweet Spot"],
+  ["threshold", "Umbral"], ["vo2max", "VO2máx"],
+];
+const PHASE_ES = {
+  off: "sin meta", base: "base", build: "construcción",
+  peak: "punta", taper: "descarga", race: "carrera",
+};
+
 function renderHorizon(days) {
   if (!days.length) { $("#horizon-content").innerHTML = `<div class="loading">Sin datos.</div>`; return; }
   const names = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
   $("#horizon-content").innerHTML = days.map((h, i) => {
     const d = i === 0 ? "HOY" : names[new Date(h.day).getDay()];
-    // Si la API no manda los bloques (servidor antiguo), lo decimos claro en vez
-    // de un "sin bloques" que parece un fallo del plan.
-    const detail = (h.targets && h.targets.length)
+    const blocks = (h.targets && h.targets.length)
       ? h.targets.map(blockHtml).join("")
-      : `<div class="empty">${h.objective === "rest"
-          ? "Día de descanso — sin sesión."
-          : `${h.session} · ${hhmm(h.minutes)} h (reinicia el servidor para ver los bloques)`}</div>`;
-    return `<div class="hitem">
+      : `<div class="empty">${h.objective === "rest" ? "Día libre — sin sesión." : ""}</div>`;
+    const why = (h.rationale || "").replace(/\[/g, "· ").replace(/\]/g, "");
+    return `<div class="hitem" data-day="${h.day}">
       <div class="hrow"><span class="d">${d}</span>
         <span class="o">${h.objective.replace("_", " ")}<br><span style="color:var(--muted);font-size:12px">${h.session}</span></span>
         <span class="t"><b class="hdur">${h.minutes ? hhmm(h.minutes) + " h" : "libre"}</b><br>${h.tss} TSS</span>
         <span class="chev">${icon("chevron", 14)}</span></div>
-      <div class="hdetail" style="display:none">${detail}</div>
+      <div class="hdetail" style="display:none">
+        ${h.description ? `<p class="hdesc">${h.description}</p>` : ""}
+        <div class="hstats">
+          <div class="hs"><b>${hhmm(h.minutes)}</b><span>duración</span></div>
+          <div class="hs"><b>${h.tss}</b><span>TSS</span></div>
+          <div class="hs"><b>${h.intensity != null ? h.intensity.toFixed(2) : "—"}</b><span>IF</span></div>
+          <div class="hs"><b>${signed(h.tsb)}</b><span>forma ese día</span></div>
+          <div class="hs"><b>${h.ctl}</b><span>fitness</span></div>
+          <div class="hs"><b>${PHASE_ES[h.phase] || h.phase}</b><span>fase</span></div>
+        </div>
+        ${blocks}
+        ${why ? `<div class="hwhy"><b>Por qué:</b> ${why}</div>` : ""}
+        <div class="dayctl">
+          <div class="dayrow"><span>Tiempo ese día</span>
+            <input type="range" class="dmin" min="0" max="360" step="15" value="${h.minutes || 0}" />
+            <b class="dminl">${h.minutes ? hhmm(h.minutes) : "libre"}</b></div>
+          <div class="dayrow"><span>Entrenamiento</span>
+            <select class="dobj">${OBJECTIVES.map(([v, l]) =>
+              `<option value="${v}">${l}</option>`).join("")}</select></div>
+          <button class="dsave">Guardar este día</button>
+          <span class="dmsg"></span>
+        </div>
+      </div>
     </div>`;
   }).join("");
-  $("#horizon-content").querySelectorAll(".hrow").forEach((row) => {
-    row.addEventListener("click", () => {
-      const det = row.parentElement.querySelector(".hdetail");
+
+  $("#horizon-content").querySelectorAll(".hitem").forEach((item) => {
+    const row = item.querySelector(".hrow"), det = item.querySelector(".hdetail");
+    row.addEventListener("click", async () => {
       const open = det.style.display !== "none";
       det.style.display = open ? "none" : "block";
       row.classList.toggle("open", !open);
+      if (!open && !det.dataset.init) {          // estado guardado de ese día
+        det.dataset.init = "1";
+        try {
+          const cfg = await api(`/api/day/${item.dataset.day}`);
+          if (cfg.objective) det.querySelector(".dobj").value = cfg.objective;
+        } catch (_) {}
+      }
+    });
+    const slider = item.querySelector(".dmin"), lbl = item.querySelector(".dminl");
+    slider.addEventListener("input", () => {
+      lbl.textContent = Number(slider.value) ? hhmm(slider.value) : "libre";
+    });
+    item.querySelector(".dsave").addEventListener("click", async (ev) => {
+      const btn = ev.currentTarget, msg = item.querySelector(".dmsg");
+      btn.disabled = true; msg.textContent = "Guardando…";
+      try {
+        await api("/api/day", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: item.dataset.day,
+            minutes: Number(slider.value),
+            objective: item.querySelector(".dobj").value,
+          }),
+        });
+        msg.textContent = "✓ guardado";
+        horizonLoaded = false; loadHorizon(); loadHome();
+      } catch (e) { msg.textContent = e.detail || "Error"; btn.disabled = false; }
     });
   });
 }
@@ -732,23 +789,55 @@ async function sendChat() {
   const pending = document.createElement("div");
   pending.className = "msg bot"; pending.textContent = "…";
   $("#chat-log").appendChild(pending);
+  // Streaming: la respuesta se va escribiendo según llega (SSE), en vez de
+  // esperar al mensaje entero. Si algo falla, cae al modo clásico.
   try {
-    const r = await api("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: msg }) });
-    pending.remove();
-    const logged = Object.keys(r.logged || {});
-    if (logged.length) addMsg("✓ registrado: " + logged.join(", "), "hint");
-    const changed = Object.keys(r.changed || {});
-    if (changed.length) {
-      addMsg("✓ actualizado: " + changed.join(", "), "hint");
-      horizonLoaded = false; activitiesLoaded = false;   // el cambio afecta al plan
+    const resp = await fetch("/api/chat/stream", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: msg }),
+    });
+    if (!resp.ok || !resp.body) throw new Error("sin stream");
+    const reader = resp.body.getReader(), dec = new TextDecoder();
+    let buf = "", started = false;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const events = buf.split("\n\n");
+      buf = events.pop() || "";                 // el último puede venir a medias
+      for (const ev of events) {
+        const type = (ev.match(/^event: (.+)$/m) || [])[1];
+        const raw = (ev.match(/^data: (.*)$/m) || [])[1];
+        if (!type || raw === undefined) continue;
+        let data; try { data = JSON.parse(raw); } catch { continue; }
+        if (type === "meta") {
+          const logged = Object.keys(data.logged || {});
+          if (logged.length) addMsg("✓ registrado: " + logged.join(", "), "hint");
+          const changed = Object.keys(data.changed || {});
+          if (changed.length) {
+            addMsg("✓ actualizado: " + changed.join(", "), "hint");
+            horizonLoaded = false; activitiesLoaded = false;
+          }
+          const hint = [];
+          if (data.intent && data.intent.minutes != null) hint.push(hhmm(data.intent.minutes) + " h");
+          if (data.intent && data.intent.readiness) hint.push(data.intent.readiness);
+          if (hint.length) addMsg("interpretado: " + hint.join(", "), "hint");
+          $("#chat-log").appendChild(pending);   // el globo vuelve al final
+        } else if (type === "chunk") {
+          if (!started) { pending.textContent = ""; started = true; }
+          pending.textContent += data.text;
+          pending.scrollIntoView({ behavior: "smooth", block: "end" });
+        } else if (type === "error") {
+          pending.textContent = data.detail || "No pude responder.";
+        }
+      }
     }
-    const hint = [];
-    if (r.intent.minutes != null) hint.push(r.intent.minutes + " min");
-    if (r.intent.readiness) hint.push(r.intent.readiness);
-    if (hint.length) addMsg("interpretado: " + hint.join(", "), "hint");
-    addMsg(r.text, "bot");
+    if (!started && pending.textContent === "…") pending.textContent = "No pude responder.";
     loadHome();
-  } catch (e) { pending.remove(); addMsg(e.detail || "No pude responder (¿LLM configurado?).", "bot"); }
+  } catch (e) {
+    pending.remove();
+    addMsg(e.detail || "No pude responder (¿LLM configurado?).", "bot");
+  }
 }
 
 // --- Navegación -------------------------------------------------------------

@@ -376,6 +376,77 @@ class ChatSession:
         self.history = recent_chat(session, self.athlete_id, since)
         self._loaded = True
 
+    def turn_stream(self, session: Session, message: str):
+        """Como `turn`, pero va soltando la respuesta en TROZOS según llega del
+        LLM (para que el chat se vea escribir). Rinde ('meta', dict) primero con
+        lo interpretado/registrado, luego ('chunk', texto)…, y ('done', Reply).
+
+        El motor decide ANTES de escribir: la ficha ya está calculada cuando
+        empieza a salir texto, así que el streaming no afecta a la decisión."""
+        self.load_memory(session)
+        intent = parse_intent(self.llm, message)
+        if intent.minutes is not None:
+            self.minutes = intent.minutes
+        if intent.readiness is not None:
+            self.readiness = intent.readiness
+
+        logged = log_metrics(session, self.athlete_id, self.as_of, intent.log) if intent.log else {}
+        changed = _apply_changes(session, self.athlete_id, intent, self.as_of)
+        if "feel" in logged:
+            self.readiness = None
+        cri_override = _READINESS_CRI.get(self.readiness or "")
+
+        facts = gather_facts(
+            session, self.athlete_id, self.as_of,
+            minutes=self.minutes, cri_override=cri_override, with_horizon=True,
+        )
+        block = facts.to_prompt()
+        if logged:
+            block += (
+                "\n\nEl ciclista ACABA DE REGISTRAR (confírmalo): "
+                f"{_logged_note(logged)}."
+            )
+        if changed:
+            block += f"\n\nDATOS ACTUALIZADOS (confírmalo): {_changes_note(*changed)}."
+        system = (
+            f"{EXPLAIN_SYSTEM}\n\nFICHA ACTUAL (única fuente de cifras):\n{block}"
+        )
+        messages = [
+            {"role": "system", "content": system},
+            *self.history,
+            {"role": "user", "content": message},
+        ]
+        yield "meta", {
+            "intent": {
+                "kind": intent.kind, "minutes": self.minutes,
+                "readiness": self.readiness,
+            },
+            "logged": logged,
+            "changed": _changed_dict(changed),
+        }
+
+        parts: list[str] = []
+        for piece in self.llm.chat_stream(messages):
+            parts.append(piece)
+            yield "chunk", piece
+        text = "".join(parts).strip()
+
+        self.history.append({"role": "user", "content": message})
+        self.history.append({"role": "assistant", "content": text})
+        self.history = self.history[-CHAT_CONTEXT_MESSAGES:]
+        if session is not None:
+            add_chat_messages(
+                session, self.athlete_id, [("user", message), ("assistant", text)]
+            )
+        yield "done", Reply(
+            text=text,
+            intent=Intent(
+                kind=intent.kind, minutes=self.minutes, readiness=self.readiness,
+                question=intent.question, log=intent.log,
+            ),
+            facts=facts, logged=logged, changed=_changed_dict(changed),
+        )
+
     def turn(self, session: Session, message: str) -> Reply:
         self.load_memory(session)
         intent = parse_intent(self.llm, message)

@@ -23,6 +23,7 @@ from cycling_coach.db.models import (
     Goal,
     ModelConfig,
     ParameterEstimate,
+    PlanOverride,
     Stream,
     TestResult,
     User,
@@ -565,6 +566,38 @@ def clear_availability_override(session: Session, athlete_id: int, day: date) ->
         delete(AvailabilityOverride).where(
             AvailabilityOverride.athlete_id == athlete_id,
             AvailabilityOverride.day == day,
+        )
+    )
+
+
+# --- Entrenamiento elegido por el atleta para un día concreto ----------------
+def get_plan_overrides(
+    session: Session, athlete_id: int, start: date, end: date
+) -> dict[date, str]:
+    rows = session.execute(
+        select(PlanOverride.day, PlanOverride.objective).where(
+            PlanOverride.athlete_id == athlete_id,
+            PlanOverride.day >= start, PlanOverride.day <= end,
+        )
+    ).all()
+    return {d: o for d, o in rows}
+
+
+def set_plan_override(
+    session: Session, athlete_id: int, day: date, objective: str
+) -> None:
+    stmt = insert(PlanOverride).values(
+        athlete_id=athlete_id, day=day, objective=objective
+    )
+    session.execute(stmt.on_conflict_do_update(
+        index_elements=["athlete_id", "day"], set_={"objective": objective},
+    ))
+
+
+def clear_plan_override(session: Session, athlete_id: int, day: date) -> None:
+    session.execute(
+        delete(PlanOverride).where(
+            PlanOverride.athlete_id == athlete_id, PlanOverride.day == day
         )
     )
 

@@ -5,6 +5,7 @@ app móvil el día de mañana."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -35,22 +36,29 @@ from cycling_coach.db.engine import ensure_schema, session_scope
 from cycling_coach.db.models import Activity
 from cycling_coach.db.repositories import (
     add_goal,
+    clear_plan_override,
     count_users,
     create_athlete,
     create_user,
     first_athlete_id,
     get_athlete,
     get_availability,
+    get_availability_overrides,
     get_or_create_secret,
+    get_plan_overrides,
     get_user,
     get_user_by_username,
     next_goal,
     save_profile,
     set_availability,
+    set_availability_override,
+    set_plan_override,
 )
 from cycling_coach.physiology import compute_ctl_atl_tsb
+from cycling_coach.planner.library import Objective
 from cycling_coach.planner.planner import PlannedSession
 from cycling_coach.planner.service import plan_horizon
+from cycling_coach.planner.simulator import session_intensity
 from cycling_coach.sync import SyncError, sync_recent
 from cycling_coach.twin.activity_service import activity_detail, list_activities
 from cycling_coach.twin.coherence_service import assess_cp_coherence, power_curve
@@ -181,6 +189,12 @@ class GoalIn(BaseModel):
     priority: str = "A"
 
 
+class DayPlanIn(BaseModel):
+    date: str                        # ISO YYYY-MM-DD
+    minutes: int | None = None       # disponibilidad de ESE día (0 = libre)
+    objective: str | None = None     # entrenamiento elegido; "auto" = que decida el motor
+
+
 class ProfileIn(BaseModel):
     name: str | None = None
     level: str | None = None            # principiante|intermedio|avanzado|elite
@@ -229,6 +243,11 @@ def create_app() -> FastAPI:
                 "minutes": round(h.plan.template.total_minutes()),
                 "tss": round(h.tss),
                 "targets": h.plan.targets,
+                "rationale": h.plan.rationale,
+                "aspired": h.plan.aspired.value if h.plan.aspired else None,
+                "atl": round(h.atl, 1),
+                "intensity": round(session_intensity(h.plan.template), 2),
+                "description": h.plan.template.description,
             }
             for h in plan_horizon(session, aid, start, days=days)
         ]
@@ -416,6 +435,44 @@ def create_app() -> FastAPI:
                 raise HTTPException(422, "Fecha de objetivo inválida.") from exc
         return {"ok": True}
 
+    @app.post("/api/day")
+    def set_day(body: DayPlanIn, session: DB, aid: AID) -> dict[str, Any]:
+        """Ajusta un DÍA concreto: su disponibilidad y/o el entrenamiento que
+        quieres hacer. 'auto' devuelve la decisión al motor."""
+        try:
+            day = date.fromisoformat(body.date)
+        except ValueError as exc:
+            raise HTTPException(422, "Fecha inválida (AAAA-MM-DD).") from exc
+        if body.minutes is not None:
+            if not 0 <= body.minutes <= 600:
+                raise HTTPException(422, "Minutos fuera de rango (0–600).")
+            set_availability_override(session, aid, day, body.minutes)
+        if body.objective is not None:
+            if body.objective in ("auto", ""):
+                clear_plan_override(session, aid, day)
+            elif body.objective in {o.value for o in Objective}:
+                set_plan_override(session, aid, day, body.objective)
+            else:
+                raise HTTPException(422, "Objetivo desconocido.")
+        return {"ok": True}
+
+    @app.get("/api/day/{day}")
+    def get_day(day: str, session: DB, aid: AID) -> dict[str, Any]:
+        """Ajustes vigentes de un día: disponibilidad puntual y elección."""
+        try:
+            d = date.fromisoformat(day)
+        except ValueError as exc:
+            raise HTTPException(422, "Fecha inválida.") from exc
+        avail = get_availability(session, aid)
+        over = get_availability_overrides(session, aid, d, d)
+        chosen = get_plan_overrides(session, aid, d, d)
+        return {
+            "date": day,
+            "minutes": over.get(d, avail.get(d.weekday())),
+            "is_override": d in over,
+            "objective": chosen.get(d, "auto"),
+        }
+
     @app.post("/api/goal")
     def set_goal_ep(body: GoalIn, session: DB, aid: AID) -> dict[str, Any]:
         try:
@@ -451,6 +508,38 @@ def create_app() -> FastAPI:
             "streams": r.streams_ingested,
             "skipped": r.skipped_existing,
         }
+
+    @app.post("/api/chat/stream")
+    def chat_stream_ep(body: ChatIn, session: DB, aid: AID) -> StreamingResponse:
+        """Chat con respuesta en STREAMING (SSE): el texto llega por trozos y la
+        app lo va escribiendo, en vez de esperar al mensaje completo."""
+        key = str(aid)
+        if key not in chat_state:
+            try:
+                chat_state[key] = ChatSession(aid, date.today(), LLMClient.from_settings())
+            except LLMError as exc:
+                raise HTTPException(503, str(exc)) from exc
+
+        def events():
+            try:
+                for kind, payload in chat_state[key].turn_stream(session, body.message):
+                    if kind == "done":
+                        data = {"plan": _plan_json(payload.facts.plan)}
+                    elif kind == "meta":
+                        data = payload
+                    else:
+                        data = {"text": payload}
+                    body_json = json.dumps(data, default=str)
+                    yield f"event: {kind}\ndata: {body_json}\n\n"
+            except LLMError as exc:
+                err = json.dumps({"detail": str(exc)})
+                yield f"event: error\ndata: {err}\n\n"
+
+        return StreamingResponse(
+            events(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.post("/api/chat")
     def chat(body: ChatIn, session: DB, aid: AID) -> dict[str, Any]:

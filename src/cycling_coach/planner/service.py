@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from cycling_coach.db.repositories import (
     get_availability,
     get_availability_overrides,
+    get_plan_overrides,
     latest_parameter_estimate,
     next_goal,
 )
@@ -121,9 +122,13 @@ def plan_horizon(
     overrides = get_availability_overrides(
         session, athlete_id, as_of, as_of + timedelta(days=days)
     )
+    chosen = get_plan_overrides(
+        session, athlete_id, as_of, as_of + timedelta(days=days)
+    )
     return roll_horizon(
         ftp=ftp, ctl=current.ctl, atl=current.atl, context=ctx, cri=cri,
         days=days, start=as_of, days_to_event=days_to_event, minutes=minutes,
         daily_minutes=avail or None, date_minutes=overrides or None,
+        date_objective=chosen or None,
         event_kind=goal.kind if goal else None,
     )

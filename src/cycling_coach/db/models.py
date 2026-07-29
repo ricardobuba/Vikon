@@ -309,6 +309,23 @@ class AvailabilityOverride(Base):
     minutes: Mapped[int] = mapped_column(Integer)
 
 
+class PlanOverride(Base):
+    """Entrenamiento que TÚ eliges para un día concreto. Manda sobre lo que
+    propone el motor (la dosis se sigue ajustando a tu forma y tiempo)."""
+
+    __tablename__ = "plan_override"
+    __table_args__ = (
+        UniqueConstraint("athlete_id", "day", name="uq_athlete_plan_day"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    athlete_id: Mapped[int] = mapped_column(
+        ForeignKey("athlete.id", ondelete="CASCADE"), index=True
+    )
+    day: Mapped[date] = mapped_column(Date, index=True)
+    objective: Mapped[str] = mapped_column(Text)   # rest|recovery|endurance|...
+
+
 class ChatMessage(Base):
     """Historial del chat con Vikon (memoria de ~1 semana). Persistirlo hace que
     la conversación sobreviva a reinicios del servidor y a cambiar de móvil."""

@@ -637,6 +637,7 @@ def roll_horizon(
     minutes: float | None = None,
     daily_minutes: dict[int, int] | None = None,
     date_minutes: dict[date, int] | None = None,
+    date_objective: dict[date, str] | None = None,
     event_kind: str | None = None,
 ) -> list[HorizonDay]:
     """Proyecta `days` días encadenando `plan_session` y ARRASTRANDO el estado
@@ -799,6 +800,33 @@ def roll_horizon(
                     plan = rest_session(
                         ftp, "semana de descarga: hoy descansas para asimilar la carga"
                     )
+
+        # Entrenamiento ELEGIDO por el atleta para ese día: manda sobre lo que
+        # propone el motor. La DOSIS se sigue ajustando a su forma y tiempo (no
+        # es un cheque en blanco: elige el QUÉ, el motor calibra el CUÁNTO).
+        chosen = (date_objective or {}).get(day)
+        if chosen and chosen != plan.objective.value:
+            try:
+                obj = Objective(chosen)
+            except ValueError:
+                obj = None
+            if obj is Objective.rest:
+                plan = rest_session(ftp, "descanso: lo elegiste tú para este día")
+            elif obj is not None:
+                n = len(LIBRARY[obj].variants)
+                ch = choose_dose_by_simulation(
+                    obj, ctl, atl, floor, minutes=md, max_level=n - 1
+                )
+                plan = replace(
+                    plan, objective=obj, template=ch.template,
+                    targets=render_targets(ch.template, ftp), aspired=None,
+                    rationale=(
+                        f"Objetivo: {obj.value} — lo elegiste tú para este día. "
+                        f"Sesión: {ch.template.name} ({ch.template.description})"
+                        + ("" if ch.safe else " [ojo: el modelo predice que te deja "
+                           "por debajo de tu suelo de forma]")
+                    ),
+                )
 
         tss = estimate_session_tss(plan.template)
         week_tss += tss
