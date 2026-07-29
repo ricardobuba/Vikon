@@ -476,3 +476,38 @@ nav button, .block, .hrow, .stat { transition: color .2s, background .2s, transf
 }
 .dsave:disabled { opacity: .6; }
 .dmsg { display: block; text-align: center; font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+
+/* --- Esqueleto de carga: se ve la ESTRUCTURA mientras llegan los datos, en vez
+   de un texto vacío. Reduce la espera percibida sin mentir sobre el contenido. */
+@keyframes shimmer { 0% { background-position: -420px 0; } 100% { background-position: 420px 0; } }
+.sk {
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--card-2) 25%, #E3EBF6 50%, var(--card-2) 75%);
+  background-size: 420px 100%;
+  animation: shimmer 1.25s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
+.sk-line { height: 12px; margin: 8px 0; }
+.sk-hero { height: 128px; border-radius: var(--radius); margin-top: 10px; }
+.sk-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 16px; }
+.sk-stat { height: 62px; border-radius: 14px; }
+.sk-card { height: 150px; border-radius: var(--radius); margin-top: 14px; }
+.sk-row { height: 58px; border-radius: 12px; margin-bottom: 8px; }
+
+
+/* --- Cumplimiento del plan --- */
+.cmhead { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0 8px; text-align: center; }
+.cmhead .cmbig { display: block; font-family: 'Sora'; font-size: 20px; font-weight: 700; }
+.cmhead span { font-size: 10px; color: var(--muted); }
+.cmbar { height: 8px; border-radius: 4px; background: var(--card-2); overflow: hidden; margin-bottom: 12px; }
+.cmbar span { display: block; height: 100%; background: var(--grad); border-radius: 4px; }
+.cmlist { display: flex; flex-direction: column; gap: 5px; }
+.cmrow { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.cmrow .cmd { width: 46px; color: var(--muted); }
+.cmrow .cmn { flex: 1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmtag { border-radius: 999px; padding: 2px 8px; font-size: 10px; font-weight: 600; white-space: nowrap; }
+.cmtag.ok { background: rgba(3,156,134,.13); color: var(--teal); }
+.cmtag.warn { background: rgba(201,124,8,.13); color: var(--amber); }
+.cmtag.bad { background: rgba(217,59,59,.13); color: var(--red); }
+.cmtag.info { background: rgba(31,107,236,.11); color: var(--electric); }

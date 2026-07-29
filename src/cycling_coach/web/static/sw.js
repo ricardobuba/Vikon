@@ -3,9 +3,9 @@
  * deben ser siempre frescos; una respuesta vieja daría un plan equivocado).
  * Solo cachea el "armazón" (HTML/CSS/JS/iconos) para que la app abra al
  * instante y muestre algo aunque no haya red. */
-const CACHE = "vikon-shell-v19";
+const CACHE = "vikon-shell-v21";
 const SHELL = [
-  "/", "/static/styles.css?v=19", "/static/app.js?v=19",
+  "/", "/static/styles.css?v=21", "/static/app.js?v=21",
   "/static/logo.png", "/static/isotipo.png", "/static/manifest.webmanifest",
 ];
 

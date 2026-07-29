@@ -326,6 +326,26 @@ class PlanOverride(Base):
     objective: Mapped[str] = mapped_column(Text)   # rest|recovery|endurance|...
 
 
+class PlanLog(Base):
+    """Lo que el motor PRESCRIBIÓ cada día. Sin esto no se puede medir el
+    cumplimiento: el horizonte se recalcula cada vez y se perdería lo que se
+    llegó a comprometer."""
+
+    __tablename__ = "plan_log"
+    __table_args__ = (
+        UniqueConstraint("athlete_id", "day", name="uq_athlete_planlog_day"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    athlete_id: Mapped[int] = mapped_column(
+        ForeignKey("athlete.id", ondelete="CASCADE"), index=True
+    )
+    day: Mapped[date] = mapped_column(Date, index=True)
+    objective: Mapped[str] = mapped_column(Text)
+    session_name: Mapped[str | None] = mapped_column(Text)
+    tss: Mapped[float | None] = mapped_column(Double)
+
+
 class ChatMessage(Base):
     """Historial del chat con Vikon (memoria de ~1 semana). Persistirlo hace que
     la conversación sobreviva a reinicios del servidor y a cambiar de móvil."""

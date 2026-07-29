@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
@@ -45,9 +46,11 @@ from cycling_coach.db.repositories import (
     get_availability,
     get_availability_overrides,
     get_or_create_secret,
+    get_plan_log,
     get_plan_overrides,
     get_user,
     get_user_by_username,
+    log_plan,
     next_goal,
     save_profile,
     set_availability,
@@ -58,11 +61,12 @@ from cycling_coach.physiology import compute_ctl_atl_tsb
 from cycling_coach.planner.library import Objective
 from cycling_coach.planner.planner import PlannedSession
 from cycling_coach.planner.service import plan_horizon
-from cycling_coach.planner.simulator import session_intensity
+from cycling_coach.planner.simulator import estimate_session_tss, session_intensity
 from cycling_coach.sync import SyncError, sync_recent
 from cycling_coach.twin.activity_service import activity_detail, list_activities
 from cycling_coach.twin.autocalibrate import autocalibrate
 from cycling_coach.twin.coherence_service import assess_cp_coherence, power_curve
+from cycling_coach.twin.compliance import compliance_report
 from cycling_coach.twin.load_service import daily_load_and_intensity, smoothed_cp_states
 
 _STATIC = Path(__file__).parent / "static"
@@ -97,6 +101,24 @@ async def _sync_loop(interval_s: int) -> None:
         await asyncio.sleep(interval_s)
 
 
+def _warm_cache() -> None:
+    """Precalcula el suavizador de CP al arrancar.
+
+    Medido: 7.8 s en frío vs 0.007 s cacheado, y es el 97% del tiempo de
+    /api/state. Hacerlo aquí mueve esa espera a un momento en que el usuario
+    no está mirando, en vez de cobrársela en su primera pantalla."""
+    try:
+        with session_scope() as session:
+            aid = first_athlete_id(session)
+            if aid is None:
+                return
+            t0 = time.perf_counter()
+            smoothed_cp_states(session, aid)
+            _log.info("Caché de CP lista en %.1f s.", time.perf_counter() - t0)
+    except Exception:
+        _log.exception("precalentado de caché: error (no bloquea)")
+
+
 def _recalibrate():
     """Reestima CP/W'/FTP del atleta si hay datos nuevos. Nunca revienta el
     bucle de sync: un fallo aquí no debe cortar la ingesta."""
@@ -114,11 +136,15 @@ def _recalibrate():
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     ensure_schema()                    # crea/actualiza el esquema (idempotente)
+    # Calienta la caché pesada YA, en segundo plano: la primera pantalla del
+    # usuario no debe pagar los ~8 s del suavizador de CP.
+    warm = asyncio.create_task(asyncio.to_thread(_warm_cache))
     interval = get_settings().sync_interval_s
     task = asyncio.create_task(_sync_loop(interval)) if interval > 0 else None
     try:
         yield
     finally:
+        warm.cancel()
         if task is not None:
             task.cancel()
 
@@ -252,7 +278,46 @@ def create_app() -> FastAPI:
     @app.get("/api/state")
     def state(session: DB, aid: AID) -> dict[str, Any]:
         facts = gather_facts(session, aid, date.today())
+        # Deja constancia de lo prescrito: sin esto no se puede medir después si
+        # el plan se siguió (el horizonte se recalcula y se perdería).
+        if facts.plan is not None and facts.plan_date is not None:
+            log_plan(
+                session, aid, facts.plan_date, facts.plan.objective.value,
+                facts.plan.template.name,
+                estimate_session_tss(facts.plan.template),
+            )
         return _facts_json(facts)
+
+    @app.get("/api/compliance")
+    def compliance_ep(session: DB, aid: AID, days: int = 28) -> dict[str, Any]:
+        """Cumplimiento: lo prescrito vs lo entrenado en los últimos `days`."""
+        end = date.today() - timedelta(days=1)      # hoy aún puede completarse
+        start = end - timedelta(days=days - 1)
+        plan = get_plan_log(session, aid, start, end)
+        if not plan:
+            return {
+                "days": [], "rate": None, "n_planned": 0, "n_followed": 0,
+                "note": "Aún no hay plan registrado. Se va guardando cada día "
+                        "que abres la app.",
+            }
+        rep = compliance_report(session, aid, plan)
+        return {
+            "rate": round(rep.rate, 2),
+            "n_planned": rep.n_planned,
+            "n_followed": rep.n_followed,
+            "tss_planned": rep.tss_planned,
+            "tss_done": rep.tss_done,
+            "load_ratio": round(rep.load_ratio, 2) if rep.load_ratio else None,
+            "days": [
+                {
+                    "day": d.day.isoformat(), "planned": d.planned_objective,
+                    "done": d.done_kind, "status": d.status, "note": d.note,
+                    "planned_tss": round(d.planned_tss) if d.planned_tss else None,
+                    "done_tss": d.done_tss, "minutes": d.done_minutes,
+                }
+                for d in rep.days
+            ],
+        }
 
     @app.get("/api/horizon")
     def horizon(session: DB, aid: AID, days: int = 7) -> list[dict[str, Any]]:

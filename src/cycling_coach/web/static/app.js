@@ -285,6 +285,15 @@ function whyCard(rationale) {
     <p>${main}</p>${chips ? `<div class="why-notes">${chips}</div>` : ""}</div>`;
 }
 
+// Esqueletos: mientras llegan los datos se ve la FORMA de la pantalla.
+const SKELETON = {
+  home: `<div class="sk sk-hero"></div>
+    <div class="sk-stats">${'<div class="sk sk-stat"></div>'.repeat(4)}</div>
+    <div class="sk sk-card"></div>`,
+  rows: `${'<div class="sk sk-row"></div>'.repeat(6)}`,
+  cards: `<div class="sk sk-card"></div><div class="sk sk-card"></div>`,
+};
+
 // --- Pantalla HOY -----------------------------------------------------------
 function renderHome(s) {
   const p = s.plan;
@@ -409,6 +418,7 @@ function activityDetailHtml(d) {
 let activitiesLoaded = false;
 async function loadActivities() {
   if (activitiesLoaded) return;
+  $("#activities-content").innerHTML = SKELETON.rows;
   try { renderActivities(await api("/api/activities?limit=30")); activitiesLoaded = true; }
   catch (e) { $("#activities-content").innerHTML = `<div class="loading">${e.detail || "Error."}</div>`; }
 }
@@ -416,12 +426,43 @@ async function loadActivities() {
 // --- Pantalla PROGRESO ------------------------------------------------------
 async function renderProgress() {
   const box = $("#progress-content");
-  box.innerHTML = `<div class="loading">Cargando progreso…</div>`;
-  const [ftp, pc] = await Promise.all([
+  box.innerHTML = SKELETON.cards;
+  const [ftp, pc, comp] = await Promise.all([
     api("/api/ftp").catch(() => []),
     api("/api/power-curve").catch(() => null),
+    api("/api/compliance?days=28").catch(() => null),
   ]);
   let html = "";
+  // Cumplimiento del plan: lo prescrito vs lo hecho (cierra el bucle).
+  if (comp) {
+    if (comp.rate == null) {
+      html += `<div class="card"><h3>Cumplimiento del plan</h3>
+        <div class="sub">${comp.note}</div></div>`;
+    } else {
+      const ST = {
+        cumplido: ["ok", "Cumplido"], descanso_ok: ["ok", "Descanso"],
+        más: ["warn", "Más carga"], menos: ["warn", "Menos carga"],
+        distinto: ["warn", "Otra sesión"], no_hecho: ["bad", "No hecho"],
+        extra: ["info", "Extra"],
+      };
+      const rows = comp.days.slice(-10).reverse().map((d) => {
+        const [cls, label] = ST[d.status] || ["info", d.status];
+        return `<div class="cmrow"><span class="cmd">${shortDate(d.day)}</span>
+          <span class="cmtag ${cls}">${label}</span>
+          <span class="cmn">${d.note}</span></div>`;
+      }).join("");
+      const pct = Math.round(comp.rate * 100);
+      html += `<div class="card"><h3>Cumplimiento del plan</h3>
+        <div class="sub">Últimos 28 días · lo prescrito vs lo que hiciste</div>
+        <div class="cmhead">
+          <div><b class="cmbig">${pct}%</b><span>seguido</span></div>
+          <div><b class="cmbig">${comp.tss_done}</b><span>TSS hecho</span></div>
+          <div><b class="cmbig">${comp.tss_planned}</b><span>TSS previsto</span></div>
+        </div>
+        <div class="cmbar"><span style="width:${pct}%"></span></div>
+        <div class="cmlist">${rows}</div></div>`;
+    }
+  }
   // Tu motor: número actual (FTP/CP) — sin gráfica.
   if (ftp.length) {
     const cur = ftp[ftp.length - 1];
@@ -533,7 +574,7 @@ function renderHorizon(days) {
 // --- Pantalla AJUSTES -------------------------------------------------------
 async function renderSettings() {
   const box = $("#settings-content");
-  box.innerHTML = `<div class="loading">Cargando ajustes…</div>`;
+  box.innerHTML = SKELETON.cards;
   let s;
   try { s = await api("/api/settings"); }
   catch (e) { box.innerHTML = `<div class="loading">${e.detail || "Error cargando ajustes."}</div>`; return; }
@@ -902,11 +943,16 @@ function show(view) {
 
 let horizonLoaded = false;
 async function loadHome() {
-  try { renderHome(await api("/api/state")); }
+  if (!$("#home-content").dataset.ready) $("#home-content").innerHTML = SKELETON.home;
+  try {
+    renderHome(await api("/api/state"));
+    $("#home-content").dataset.ready = "1";
+  }
   catch (e) { $("#home-content").innerHTML = `<div class="loading">${e.detail || "Error cargando el estado."}</div>`; }
 }
 async function loadHorizon() {
   if (horizonLoaded) return;
+  $("#horizon-content").innerHTML = SKELETON.rows;
   try { renderHorizon(await api("/api/horizon?days=7")); horizonLoaded = true; }
   catch (e) { $("#horizon-content").innerHTML = `<div class="loading">${e.detail || "Error."}</div>`; }
 }

@@ -23,6 +23,7 @@ from cycling_coach.db.models import (
     Goal,
     ModelConfig,
     ParameterEstimate,
+    PlanLog,
     PlanOverride,
     Stream,
     TestResult,
@@ -600,6 +601,34 @@ def clear_plan_override(session: Session, athlete_id: int, day: date) -> None:
             PlanOverride.athlete_id == athlete_id, PlanOverride.day == day
         )
     )
+
+
+# --- Registro del plan prescrito (para medir el cumplimiento) ----------------
+def log_plan(
+    session: Session, athlete_id: int, day: date, objective: str,
+    session_name: str | None = None, tss: float | None = None,
+) -> None:
+    """Guarda lo que el motor prescribió ese día (idempotente)."""
+    stmt = insert(PlanLog).values(
+        athlete_id=athlete_id, day=day, objective=objective,
+        session_name=session_name, tss=tss,
+    )
+    session.execute(stmt.on_conflict_do_update(
+        index_elements=["athlete_id", "day"],
+        set_={"objective": objective, "session_name": session_name, "tss": tss},
+    ))
+
+
+def get_plan_log(
+    session: Session, athlete_id: int, start: date, end: date
+) -> dict[date, tuple[str, float | None]]:
+    rows = session.execute(
+        select(PlanLog.day, PlanLog.objective, PlanLog.tss).where(
+            PlanLog.athlete_id == athlete_id,
+            PlanLog.day >= start, PlanLog.day <= end,
+        )
+    ).all()
+    return {d: (o, t) for d, o, t in rows}
 
 
 # --- Memoria del chat (~1 semana) --------------------------------------------
