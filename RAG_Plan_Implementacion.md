@@ -205,67 +205,13 @@ Sin esto no se sabe si funciona:
 
 ---
 
-## 6. Recomendación de vídeos
-
-Aquí el RAG aporta más de lo que parece, pero no donde uno espera. Tres usos, de
-menor a mayor valor:
-
-### (A) Vídeos para seguir la sesión (indoor)
-
-El emparejamiento básico —"hoy toca 6×3 min al 110%, busca un vídeo así"— **no
-necesita RAG**: necesita un índice estructurado de vídeos (duración, intervalos,
-zonas objetivo).
-
-Donde sí entra el RAG es en **qué sustitución es aceptable**. ¿Vale un 5×4 min al
-105% en lugar de 6×3 min al 115%? Eso lo responde la tabla de claims: los rangos
-de duración e intensidad que producen la misma adaptación. Sin evidencia, un
-recomendador solo puede hacer coincidencia difusa; con ella hace **equivalencia
-justificada**.
-
-### (B) Vídeos educativos sobre la sesión de hoy
-
-Hoy toca VO2máx → se recuperan los claims → los conceptos (potencia aerobia
-máxima, tiempo a VO2máx, work:rest) → se recomiendan vídeos que cubran esos
-conceptos.
-
-Y algo que casi ningún recomendador puede hacer: **filtrar pseudociencia**.
-Las afirmaciones de un vídeo se pueden contrastar con la tabla de evidencia.
-
-### (C) Ranking por alineación con la evidencia *(el más valioso)*
-
-Puntuar cada vídeo candidato según lo bien que su protocolo encaja con los rangos
-respaldados para la adaptación que buscas. Así "recomendado" **significa algo**,
-y puedes mostrar *por qué*, con la cita. Eso es un diferenciador real frente a
-cualquier recomendador por popularidad.
-
-### Límites honestos de esta parte
-
-Es la pieza menos cierta del plan y hay que verificar términos antes de construir:
-
-- **YouTube Data API v3**: cuota gratuita de 10.000 unidades/día, pero una
-  búsqueda cuesta ~100 → ~100 búsquedas diarias. Suficiente para uso personal,
-  no para indexar a lo bruto.
-- **Los subtítulos son el problema.** La API solo permite descargarlos de vídeos
-  propios; raspar transcripciones de terceros es zona gris de los términos de
-  servicio. Diseñar sobre **título, descripción y capítulos** (sí disponibles),
-  no sobre transcripciones.
-- **Los títulos mienten.** "BRUTAL VO2 MAX WORKOUT" pueden ser 40 min de tempo.
-  Hace falta extraer estructura con **puntuación de confianza** y marcar
-  explícitamente "sin verificar" cuando no se puede.
-
-**Ambigüedad que no resuelvo solo:** no sé si querías (A) vídeos para pedalear
-siguiéndolos o (B) vídeos para aprender. El plan cubre ambos, pero la prioridad
-la marcas tú.
-
----
-
-## 7. Reparto de trabajo
+## 6. Reparto de trabajo
 
 ### Tuyo (no delegable)
 
 1. **Alcance del corpus** y validación de las consultas semilla — juicio de dominio.
 2. **Decisión legal** sobre qué fuentes se ingieren y dónde está tu frontera.
-3. **Claves de API** en `.env` (embeddings, YouTube). Como siempre, las manejas tú.
+3. **Clave de API** de embeddings en `.env`. Como siempre, la manejas tú.
 4. **Aprobar los claims extraídos.** Es la puerta del grey-box y el trabajo real:
    estima ~5–10 min/día durante dos semanas, o un fin de semana en lote.
 5. **Definir el conjunto dorado**: qué es "correcto" para *tu* entrenamiento.
@@ -281,7 +227,7 @@ de coste.
 
 ---
 
-## 8. Coste
+## 7. Coste
 
 | Partida | Coste |
 |---|---|
@@ -296,7 +242,7 @@ de coste.
 
 ---
 
-## 9. Riesgos y mitigaciones
+## 8. Riesgos y mitigaciones
 
 | Riesgo | Mitigación |
 |---|---|
@@ -308,7 +254,7 @@ de coste.
 
 ---
 
-## 10. Recomendación de arranque
+## 9. Recomendación de arranque
 
 **No construir el RAG completo. Construir una rebanada vertical.**
 
