@@ -269,11 +269,42 @@ def build_cp_observations(
     """
     if not activities:
         return []
+    return build_cp_observations_from_mmp(
+        [
+            (when, key, mean_maximal_power(clean_power(watts, sample_hz), fit_durations))
+            for when, key, watts in activities
+        ],
+        window_days=window_days, stride_days=stride_days,
+        fit_durations=fit_durations, min_effort_frac=min_effort_frac,
+        wprime_mean=wprime_mean, wprime_sd=wprime_sd, meas_rel_sd=meas_rel_sd,
+    )
+
+
+def build_cp_observations_from_mmp(
+    items: list[tuple[datetime, object, dict]],
+    window_days: int = 42,
+    stride_days: int = 14,
+    fit_durations: Sequence[int] = CP_FIT_DURATIONS,
+    min_effort_frac: float = 0.90,
+    wprime_mean: float = 20000.0,
+    wprime_sd: float = 10000.0,
+    meas_rel_sd: float = 0.02,
+) -> list[CPObservation]:
+    """Igual que `build_cp_observations`, pero partiendo de curvas MMP ya
+    calculadas (fecha, clave, mmp).
+
+    Es el mismo cálculo: esta función es todo lo que hacía la anterior una vez
+    obtenida la MMP. Existe por separado porque la MMP se persiste al ingerir,
+    y así el filtro no vuelve a cargar las series enteras para recalcularla.
+    Acepta un superconjunto de duraciones: solo mira las de `fit_durations`.
+    """
+    if not items:
+        return []
 
     mmp_by_key: dict = {}
     when_by_key: dict = {}
-    for when, key, watts in activities:
-        mmp_by_key[key] = mean_maximal_power(clean_power(watts, sample_hz), fit_durations)
+    for when, key, mmp in items:
+        mmp_by_key[key] = mmp
         when_by_key[key] = when
     anomalous = _find_anomalous_keys(mmp_by_key, fit_durations)
 

@@ -159,6 +159,43 @@ class Stream(Base):
     activity: Mapped[Activity] = relationship(back_populates="streams")
 
 
+class ActivityMmp(Base):
+    """Curva de potencia máxima media (MMP) de una actividad, ya calculada.
+
+    El motor de CP nunca consume el stream crudo: consume esta curva. Derivarla
+    en cada arranque significaba cargar ~200 MB para volver a obtener unos
+    números de 120 bytes — era el 100% del coste del precalentado.
+
+    Guardarla permite además SOLTAR los streams antiguos sin perder la
+    trayectoria de CP: el dato caro se conserva, la materia prima no.
+
+    Se guardan las dos variantes porque el código las usa distinto y mezclarlas
+    cambiaría resultados en silencio: el filtro de CP trabaja sobre la señal
+    LIMPIA, y la coherencia sobre la CRUDA.
+    """
+
+    __tablename__ = "activity_mmp"
+
+    activity_id: Mapped[int] = mapped_column(
+        ForeignKey("activity.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Desnormalizados a propósito: así la carga para el filtro es una consulta
+    # sin JOIN, que es justo el camino que queremos en milisegundos.
+    athlete_id: Mapped[int] = mapped_column(
+        ForeignKey("athlete.id", ondelete="CASCADE"), index=True
+    )
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    # Versión del algoritmo (limpieza + MMP). Al cambiarlo, lo guardado queda
+    # obsoleto y se recalcula: sin esto, una mejora del filtro no se aplicaría
+    # nunca a lo ya ingerido.
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    mmp_raw: Mapped[dict] = mapped_column(JSONB)      # sobre la señal cruda
+    mmp_clean: Mapped[dict] = mapped_column(JSONB)    # sobre la señal limpiada
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class TestResult(Base):
     """Test de campo introducido por el usuario (rampa, 20-min, CP/W'...).
 

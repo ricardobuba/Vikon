@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from cycling_coach.db.models import (
     Activity,
+    ActivityMmp,
     AppMeta,
     Athlete,
     Availability,
@@ -211,6 +212,65 @@ def load_power_activities(
         .order_by(Activity.start_time)
     ).all()
     return [(start, aid, data) for start, aid, data in rows]
+
+
+def upsert_activity_mmp(
+    session: Session, *, activity_id: int, athlete_id: int, start_time: datetime,
+    version: int, mmp_raw: dict, mmp_clean: dict,
+) -> None:
+    stmt = insert(ActivityMmp).values(
+        activity_id=activity_id, athlete_id=athlete_id, start_time=start_time,
+        version=version, mmp_raw=mmp_raw, mmp_clean=mmp_clean,
+    )
+    session.execute(stmt.on_conflict_do_update(
+        index_elements=["activity_id"],
+        set_={"version": version, "mmp_raw": mmp_raw, "mmp_clean": mmp_clean,
+              "start_time": start_time},
+    ))
+
+
+def activities_without_mmp(
+    session: Session, athlete_id: int, version: int, limit: int | None = None
+) -> list[tuple[int, datetime, list]]:
+    """(activity_id, fecha, watts) de las actividades con potencia a las que
+    aún les falta la MMP, o la tienen con una versión obsoleta."""
+    q = (
+        select(Activity.id, Activity.start_time, Stream.data)
+        .join(Stream, Stream.activity_id == Activity.id)
+        .outerjoin(ActivityMmp, ActivityMmp.activity_id == Activity.id)
+        .where(
+            Activity.athlete_id == athlete_id,
+            Stream.stream_type == "watts",
+            Activity.device_watts.is_(True),
+            or_(ActivityMmp.activity_id.is_(None), ActivityMmp.version != version),
+        )
+        .order_by(Activity.start_time.desc())     # lo reciente primero: vale más
+    )
+    if limit is not None:
+        q = q.limit(limit)
+    return [(aid, start, data) for aid, start, data in session.execute(q).all()]
+
+
+def load_power_mmp(
+    session: Session, athlete_id: int, version: int | None = None
+) -> list[tuple[datetime, int, dict, dict]]:
+    """(fecha, activity_id, mmp_cruda, mmp_limpia) ordenadas por fecha.
+
+    Sustituye a `load_power_activities` en el camino del filtro de CP: es la
+    misma información que este consume, sin cargar las series enteras."""
+    q = select(
+        ActivityMmp.start_time, ActivityMmp.activity_id,
+        ActivityMmp.mmp_raw, ActivityMmp.mmp_clean,
+    ).where(ActivityMmp.athlete_id == athlete_id)
+    if version is not None:
+        q = q.where(ActivityMmp.version == version)
+    rows = session.execute(q.order_by(ActivityMmp.start_time)).all()
+    # Las claves vuelven de JSONB como texto; el resto del código usa enteros.
+    return [
+        (start, aid, {int(k): v for k, v in raw.items()},
+         {int(k): v for k, v in clean.items()})
+        for start, aid, raw, clean in rows
+    ]
 
 
 def load_watts_stream(session: Session, activity_id: int) -> list | None:

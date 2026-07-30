@@ -22,12 +22,11 @@ from cycling_coach.db.repositories import (
     latest_parameter_estimate,
     load_activity_loads,
     load_hr_only_loads,
-    load_power_activities,
     upsert_daily_metric,
 )
 from cycling_coach.domain.models import CanonicalDailyMetric
 from cycling_coach.physiology import (
-    build_cp_observations,
+    build_cp_observations_from_mmp,
     compute_ctl_atl_tsb,
     hr_trimp_tss,
     run_cp_smoother,
@@ -41,7 +40,7 @@ from cycling_coach.planner.planner import (
     _weighted_fraction_below,
     days_since_quality,
 )
-from cycling_coach.twin.cp_estimation import resolve_config
+from cycling_coach.twin.cp_estimation import _mmp_items, resolve_config
 
 
 @dataclass
@@ -80,8 +79,9 @@ def smoothed_cp_states(session: Session, athlete_id: int) -> list:
     hit = _SMOOTH_CACHE.get(athlete_id)
     if hit is not None and hit[0] == sig:
         return hit[1]
-    activities = load_power_activities(session, athlete_id)
-    obs = build_cp_observations([(st, aid, d) for st, aid, d in activities])
+    # Desde la MMP persistida: antes se cargaban ~200 MB de series para volver a
+    # derivar unos números ya calculados, y eso era el 100% del coste.
+    obs = build_cp_observations_from_mmp(_mmp_items(session, athlete_id))
     states = run_cp_smoother(obs, resolve_config(session, athlete_id, None)) if obs else []
     _SMOOTH_CACHE[athlete_id] = (sig, states)
     return states

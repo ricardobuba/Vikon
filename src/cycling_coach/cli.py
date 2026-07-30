@@ -560,6 +560,34 @@ def compute_load(
 
 
 # --------------------------------------------------------------------------- #
+@app.command("backfill-mmp")
+def backfill_mmp_cmd(
+    athlete_id: int = typer.Option(None, help="Id del atleta (por defecto, el primero)."),
+    all_profiles: bool = typer.Option(False, "--all", help="Todos los perfiles."),
+) -> None:
+    """Calcula y guarda la curva MMP de las actividades que aún no la tienen.
+
+    Es lo que consume el motor de CP. Persistirla evita releer las series
+    enteras en cada arranque y permite soltar los streams antiguos sin perder
+    la trayectoria histórica. Idempotente: repetirlo no recalcula lo hecho."""
+    from cycling_coach.db.repositories import athlete_ids_with_activities
+    from cycling_coach.twin.mmp_service import backfill_mmp
+
+    with session_scope() as session:
+        ids = (
+            athlete_ids_with_activities(session) if all_profiles
+            else [_resolve_athlete_id(session, athlete_id)]
+        )
+        for aid in ids:
+            n = backfill_mmp(session, aid)
+            typer.secho(
+                f"atleta {aid}: {n} actividades calculadas"
+                + (" (ya estaba todo al día)" if n == 0 else " ✔"),
+                fg=typer.colors.GREEN if n else typer.colors.YELLOW,
+            )
+
+
+# --------------------------------------------------------------------------- #
 @app.command("checkin")
 def checkin(
     sleep: float = typer.Option(None, help="Horas de sueño anoche."),

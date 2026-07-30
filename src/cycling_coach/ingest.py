@@ -16,6 +16,7 @@ from cycling_coach.db.repositories import (
     upsert_stream,
 )
 from cycling_coach.domain.models import CanonicalActivity
+from cycling_coach.twin.mmp_service import store_mmp
 
 
 @dataclass
@@ -70,9 +71,18 @@ def backfill(
                 streams = []
             if streams:
                 with session_scope() as session:
+                    watts = None
                     for stream in streams:
                         upsert_stream(session, activity_id, stream)
                         result.streams_ingested += 1
+                        if stream.stream_type.value == "watts":
+                            watts = stream.data
+                    # La MMP se calcula UNA vez, aquí. Es lo que consume el motor
+                    # de CP, y derivarla luego obligaría a releer la serie entera.
+                    if watts and act.device_watts:
+                        store_mmp(
+                            session, athlete_id, activity_id, act.start_time, watts
+                        )
 
         if on_progress:
             on_progress(act, "ingested")

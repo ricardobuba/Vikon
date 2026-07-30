@@ -10,9 +10,8 @@ from sqlalchemy.orm import Session
 
 from cycling_coach.db.repositories import (
     latest_parameter_estimate,
-    load_power_activities,
+    load_power_mmp,
 )
-from cycling_coach.metrics.power import mean_maximal_power
 from cycling_coach.physiology.coherence import CoherenceReport, assess_coherence
 
 # Duraciones CP-relevantes (de 1 min a 60 min).
@@ -32,11 +31,14 @@ def recent_mmp(
     de los últimos `days` días."""
     cutoff = as_of - timedelta(days=days)
     agg: dict[int, float] = {}
-    for start, _aid, watts in load_power_activities(session, athlete_id):
+    # MMP CRUDA a propósito: es lo que usaba este camino antes de persistirla,
+    # y cambiar a la limpia alteraría el veredicto de coherencia en silencio.
+    for start, _aid, mmp_raw, _clean in load_power_mmp(session, athlete_id):
         if start.date() < cutoff:
             continue
-        for secs, power in mean_maximal_power(watts, _DURATIONS_S).items():
-            if power > agg.get(secs, 0.0):
+        for secs in _DURATIONS_S:
+            power = mmp_raw.get(secs)
+            if power is not None and power > agg.get(secs, 0.0):
                 agg[secs] = power
     return agg
 
@@ -66,11 +68,12 @@ def power_curve(
     wp = latest_parameter_estimate(session, athlete_id, "w_prime")
     cutoff = as_of - timedelta(days=days)
     agg: dict[int, float] = {}
-    for start, _aid, watts in load_power_activities(session, athlete_id):
+    for start, _aid, mmp_raw, _clean in load_power_mmp(session, athlete_id):
         if start.date() < cutoff:
             continue
-        for secs, power in mean_maximal_power(watts, _CURVE_DURATIONS_S).items():
-            if power > agg.get(secs, 0.0):
+        for secs in _CURVE_DURATIONS_S:
+            power = mmp_raw.get(secs)
+            if power is not None and power > agg.get(secs, 0.0):
                 agg[secs] = power
     if not agg:
         return None
