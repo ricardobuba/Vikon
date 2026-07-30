@@ -72,19 +72,69 @@ def save_tokens(
     return account
 
 
-def load_tokens(session: Session, provider: str) -> tuple[ProviderAccount, TokenSet] | None:
-    account = session.execute(
-        select(ProviderAccount)
-        .where(ProviderAccount.provider == provider)
-        .order_by(ProviderAccount.id)
-    ).scalars().first()
-    if account is None:
-        return None
-    tokens = TokenSet(
+def _tokens_of(account: ProviderAccount) -> TokenSet:
+    return TokenSet(
         access_token=account.access_token,
         refresh_token=account.refresh_token,
         expires_at=account.expires_at,  # type: ignore[arg-type]
         athlete_id=account.provider_athlete_id,
         scope=account.scope,
     )
-    return account, tokens
+
+
+def load_tokens(
+    session: Session, provider: str, athlete_id: int | None = None
+) -> tuple[ProviderAccount, TokenSet] | None:
+    """Cuenta del proveedor. Con `athlete_id`, la DE ESE atleta.
+
+    Sin `athlete_id` devuelve la primera (compatibilidad con el CLI de un solo
+    usuario). En multi-perfil hay que pasarlo SIEMPRE: si no, el padre acabaría
+    sincronizando el Strava del hijo."""
+    q = select(ProviderAccount).where(ProviderAccount.provider == provider)
+    if athlete_id is not None:
+        q = q.where(ProviderAccount.athlete_id == athlete_id)
+    account = session.execute(q.order_by(ProviderAccount.id)).scalars().first()
+    if account is None:
+        return None
+    return account, _tokens_of(account)
+
+
+def list_accounts(session: Session, provider: str) -> list[tuple[int, TokenSet]]:
+    """(athlete_id, tokens) de TODAS las cuentas conectadas — para el bucle de
+    sincronización en segundo plano, que ahora atiende a varios perfiles."""
+    accounts = session.execute(
+        select(ProviderAccount)
+        .where(ProviderAccount.provider == provider)
+        .order_by(ProviderAccount.id)
+    ).scalars().all()
+    return [(a.athlete_id, _tokens_of(a)) for a in accounts]
+
+
+def delete_account(session: Session, athlete_id: int, provider: str) -> bool:
+    """Quita la conexión con el proveedor de ese atleta. NO borra actividades:
+    el historial importado es del atleta, no de la conexión."""
+    account = session.execute(
+        select(ProviderAccount).where(
+            ProviderAccount.athlete_id == athlete_id,
+            ProviderAccount.provider == provider,
+        )
+    ).scalars().first()
+    if account is None:
+        return False
+    session.delete(account)
+    session.flush()
+    return True
+
+
+def account_owner(
+    session: Session, provider: str, provider_athlete_id: str
+) -> int | None:
+    """Atleta local dueño de esa cuenta del proveedor, si ya está enlazada.
+    Sirve para no dejar que dos perfiles reclamen el mismo Strava."""
+    account = session.execute(
+        select(ProviderAccount).where(
+            ProviderAccount.provider == provider,
+            ProviderAccount.provider_athlete_id == provider_athlete_id,
+        )
+    ).scalar_one_or_none()
+    return account.athlete_id if account else None

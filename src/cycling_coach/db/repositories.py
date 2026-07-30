@@ -514,6 +514,17 @@ def first_athlete_id(session: Session) -> int | None:
     ).scalar_one_or_none()
 
 
+def athlete_ids_with_activities(session: Session) -> list[int]:
+    """Atletas que tienen entrenamientos. Para tareas de arranque que antes
+    asumían un solo usuario (precalentado de caché) y ahora deben cubrir a
+    todos los perfiles, sin gastar trabajo en los que aún están vacíos."""
+    return list(
+        session.execute(
+            select(Activity.athlete_id).distinct().order_by(Activity.athlete_id)
+        ).scalars().all()
+    )
+
+
 def create_athlete(session: Session, name: str | None = None) -> int:
     athlete = Athlete(name=name)
     session.add(athlete)

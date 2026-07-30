@@ -109,8 +109,16 @@ def db_create() -> None:
 
 # --------------------------------------------------------------------------- #
 @app.command("strava-auth")
-def strava_auth() -> None:
-    """Lanza el flujo OAuth de Strava y persiste los tokens."""
+def strava_auth(
+    athlete_id: int = typer.Option(
+        None, help="Atleta al que enlazar la cuenta (por defecto, el primero)."
+    ),
+) -> None:
+    """Lanza el flujo OAuth de Strava y persiste los tokens.
+
+    Con varios perfiles, indica `--athlete-id`: sin él la cuenta se enlaza al
+    PRIMER atleta, que casi nunca es lo que quieres al añadir a otra persona.
+    Desde la app cada usuario lo hace solo, en Ajustes → Conectar mi Strava."""
     settings = get_settings()
     if not settings.strava_client_id or not settings.strava_client_secret:
         typer.secho(
@@ -128,11 +136,20 @@ def strava_auth() -> None:
     tokens = exchange_code(settings.strava_client_id, settings.strava_client_secret, code)
 
     with session_scope() as session:
-        athlete = accounts.ensure_athlete(session)
-        accounts.save_tokens(session, athlete.id, "strava", tokens)
+        target = athlete_id if athlete_id is not None else accounts.ensure_athlete(session).id
+        owner = accounts.account_owner(session, "strava", tokens.athlete_id or "")
+        if owner is not None and owner != target:
+            typer.secho(
+                f"Esa cuenta de Strava ya está enlazada al atleta {owner}. "
+                "Una cuenta pertenece a un solo perfil.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+        accounts.save_tokens(session, target, "strava", tokens)
 
     typer.secho(
-        f"Autorizado ✔  atleta Strava id={tokens.athlete_id}, scope={tokens.scope}",
+        f"Autorizado ✔  atleta local={target}, Strava id={tokens.athlete_id}, "
+        f"scope={tokens.scope}",
         fg=typer.colors.GREEN,
     )
 
@@ -730,15 +747,36 @@ def sync_cmd(
     no_streams: bool = typer.Option(
         False, "--no-streams", help="No descargar streams (más rápido)."
     ),
+    all_profiles: bool = typer.Option(
+        False, "--all", help="Sincroniza TODOS los perfiles conectados."
+    ),
+    athlete_id: int = typer.Option(None, help="Sincroniza solo ese atleta."),
 ) -> None:
     """Sincroniza SOLO lo nuevo desde tu última actividad (incremental, rápido).
 
     Ideal para una tarea programada (cron / Programador de tareas de Windows).
-    Es el `backfill` en pequeño: la app lo llama sola al abrir."""
-    from cycling_coach.sync import SyncError, sync_recent
+    Es el `backfill` en pequeño: la app lo llama sola al abrir. Con varios
+    perfiles usa `--all` para que entren los entrenamientos de todos."""
+    from cycling_coach.sync import SyncError, sync_all, sync_recent
+
+    if all_profiles:
+        results = sync_all(fetch_streams=not no_streams)
+        if not results:
+            typer.secho("Ningún perfil tiene Strava conectado.", fg=typer.colors.YELLOW)
+            raise typer.Exit(code=1)
+        for aid, r in results.items():
+            if isinstance(r, SyncError):
+                typer.secho(f"atleta {aid}: {r}", fg=typer.colors.YELLOW)
+            else:
+                typer.secho(
+                    f"atleta {aid} ✔  nuevas={r.activities_ingested}  "
+                    f"streams={r.streams_ingested}  ya_existentes={r.skipped_existing}",
+                    fg=typer.colors.GREEN,
+                )
+        return
 
     try:
-        r = sync_recent(fetch_streams=not no_streams)
+        r = sync_recent(athlete_id=athlete_id, fetch_streams=not no_streams)
     except SyncError as exc:
         typer.secho(str(exc), fg=typer.colors.YELLOW)
         raise typer.Exit(code=1) from exc

@@ -4,11 +4,11 @@
  * Solo cachea el "armazón" (HTML/CSS/JS/iconos) para que la app abra al
  * instante y muestre algo aunque no haya red.
  * OJO: al cambiar assets hay que subir la versión AQUÍ y en index.html. */
-const CACHE = "vikon-shell-v23";
+const CACHE = "vikon-shell-v24";
 const SHELL = [
-  "/", "/static/styles.css?v=23", "/static/app.js?v=23",
+  "/", "/static/styles.css?v=24", "/static/app.js?v=24",
   "/static/logo.png", "/static/manifest.webmanifest",
-  "/static/icon-192.png?v=23", "/static/favicon.ico?v=23",
+  "/static/icon-192.png?v=24", "/static/favicon.ico?v=24",
 ];
 
 self.addEventListener("install", (e) => {

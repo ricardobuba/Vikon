@@ -40,17 +40,27 @@ def _last_activity_after(athlete_id: int, overlap_days: int, default_days: int) 
 
 def sync_recent(
     *,
+    athlete_id: int | None = None,
     overlap_days: int = 3,
     default_days: int = 45,
     fetch_streams: bool = True,
 ) -> BackfillResult:
-    """Ingesta incremental de las actividades nuevas. Devuelve el resultado
-    (nuevas, streams, ya existentes). Lanza SyncError si falta autorización."""
+    """Ingesta incremental de las actividades nuevas DE UN ATLETA. Devuelve el
+    resultado (nuevas, streams, ya existentes). Lanza SyncError si falta
+    autorización.
+
+    `athlete_id` es obligatorio de facto en multi-perfil: sin él se coge la
+    primera cuenta (compatibilidad con el CLI de un solo usuario), y con varios
+    perfiles eso sincronizaría la cuenta equivocada."""
     settings = get_settings()
     with session_scope() as session:
-        loaded = accounts.load_tokens(session, "strava")
+        loaded = accounts.load_tokens(session, "strava", athlete_id)
         if loaded is None:
-            raise SyncError("Sin credenciales de Strava. Ejecuta `cc strava-auth`.")
+            raise SyncError(
+                "Este perfil no tiene Strava conectado."
+                if athlete_id is not None
+                else "Sin credenciales de Strava. Ejecuta `cc strava-auth`."
+            )
         account, tokens = loaded
         athlete_id = account.athlete_id
 
@@ -73,3 +83,20 @@ def sync_recent(
             )
     except Exception as exc:  # red / API / token — no tumbar la app por esto
         raise SyncError(f"No pude sincronizar con Strava: {exc}") from exc
+
+
+def sync_all(*, fetch_streams: bool = False) -> dict[int, BackfillResult | SyncError]:
+    """Sincroniza TODOS los perfiles conectados. Para el bucle en segundo plano:
+    con varios perfiles no basta con atender a una cuenta.
+
+    Un fallo en un perfil no impide sincronizar los demás — se devuelve por
+    atleta para que el llamador lo registre."""
+    with session_scope() as session:
+        athlete_ids = [aid for aid, _ in accounts.list_accounts(session, "strava")]
+    out: dict[int, BackfillResult | SyncError] = {}
+    for aid in athlete_ids:
+        try:
+            out[aid] = sync_recent(athlete_id=aid, fetch_streams=fetch_streams)
+        except SyncError as exc:
+            out[aid] = exc
+    return out

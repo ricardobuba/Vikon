@@ -15,12 +15,19 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from cycling_coach.accounts import (
+    account_owner,
+    delete_account,
+    load_tokens,
+    save_tokens,
+)
+from cycling_coach.adapters.strava.oauth import build_authorize_url, exchange_code
 from cycling_coach.assistant.assistant import ChatSession
 from cycling_coach.assistant.grounding import Facts, gather_facts, planning_date
 from cycling_coach.assistant.llm import LLMClient, LLMError
@@ -37,6 +44,7 @@ from cycling_coach.db.engine import ensure_schema, session_scope
 from cycling_coach.db.models import Activity
 from cycling_coach.db.repositories import (
     add_goal,
+    athlete_ids_with_activities,
     clear_plan_override,
     count_users,
     create_athlete,
@@ -65,7 +73,7 @@ from cycling_coach.planner.library import Objective
 from cycling_coach.planner.planner import PlannedSession
 from cycling_coach.planner.service import plan_horizon
 from cycling_coach.planner.simulator import estimate_session_tss, session_intensity
-from cycling_coach.sync import SyncError, sync_recent
+from cycling_coach.sync import SyncError, sync_all, sync_recent
 from cycling_coach.twin.activity_service import activity_detail, list_activities
 from cycling_coach.twin.autocalibrate import autocalibrate
 from cycling_coach.twin.coherence_service import assess_cp_coherence, power_curve
@@ -78,59 +86,67 @@ _log = logging.getLogger("uvicorn.error")     # aparece en la salida del servido
 
 async def _sync_loop(interval_s: int) -> None:
     """Sincroniza con Strava en segundo plano cada `interval_s` mientras el
-    servidor corre → los entrenamientos entran solos, sin abrir la app."""
+    servidor corre → los entrenamientos entran solos, sin abrir la app.
+
+    Atiende a TODOS los perfiles conectados: con varios usuarios, sincronizar
+    solo una cuenta dejaría a los demás con datos viejos."""
     _log.info("Sync automático con Strava activo (cada %ds).", interval_s)
     while True:
         try:
-            r = await asyncio.to_thread(sync_recent, fetch_streams=True)
-            _log.info(
-                "Sync automático: %d nuevas, %d ya existentes.",
-                r.activities_ingested, r.skipped_existing,
-            )
-            # El FTP/CP se recalibra solo cuando llegan datos que lo justifican
-            # (los vatios del plan salen de ahí; antes solo se actualizaba a mano).
-            if r.activities_ingested:
-                out = await asyncio.to_thread(_recalibrate)
-                if out and out.ran:
-                    delta = f" ({out.delta_ftp:+.0f} W)" if out.delta_ftp else ""
-                    _log.info(
-                        "Autocalibración: FTP %.0f W, CP %.0f W%s — %s",
-                        out.ftp, out.cp, delta, out.reason,
-                    )
-        except SyncError as exc:
-            _log.warning("sync automático falló: %s", exc)
+            results = await asyncio.to_thread(sync_all, fetch_streams=True)
+            for aid, r in results.items():
+                if isinstance(r, SyncError):
+                    _log.warning("sync automático (atleta %d) falló: %s", aid, r)
+                    continue
+                _log.info(
+                    "Sync automático (atleta %d): %d nuevas, %d ya existentes.",
+                    aid, r.activities_ingested, r.skipped_existing,
+                )
+                # El FTP/CP se recalibra solo cuando llegan datos que lo justifican
+                # (los vatios del plan salen de ahí; antes solo se actualizaba a mano).
+                if r.activities_ingested:
+                    out = await asyncio.to_thread(_recalibrate, aid)
+                    if out and out.ran:
+                        delta = f" ({out.delta_ftp:+.0f} W)" if out.delta_ftp else ""
+                        _log.info(
+                            "Autocalibración (atleta %d): FTP %.0f W, CP %.0f W%s — %s",
+                            aid, out.ftp, out.cp, delta, out.reason,
+                        )
         except Exception:                       # nunca tumbar el bucle
             _log.exception("sync automático: error inesperado")
         await asyncio.sleep(interval_s)
 
 
 def _warm_cache() -> None:
-    """Precalcula el suavizador de CP al arrancar.
+    """Precalcula el suavizador de CP al arrancar, para CADA perfil.
 
     Medido: 7.8 s en frío vs 0.007 s cacheado, y es el 97% del tiempo de
     /api/state. Hacerlo aquí mueve esa espera a un momento en que el usuario
     no está mirando, en vez de cobrársela en su primera pantalla."""
     try:
         with session_scope() as session:
-            aid = first_athlete_id(session)
-            if aid is None:
-                return
-            t0 = time.perf_counter()
-            smoothed_cp_states(session, aid)
-            _log.info("Caché de CP lista en %.1f s.", time.perf_counter() - t0)
+            aids = athlete_ids_with_activities(session)
+        for aid in aids:
+            try:
+                with session_scope() as session:
+                    t0 = time.perf_counter()
+                    smoothed_cp_states(session, aid)
+                    _log.info(
+                        "Caché de CP lista (atleta %d) en %.1f s.",
+                        aid, time.perf_counter() - t0,
+                    )
+            except Exception:
+                _log.exception("precalentado (atleta %d): error (no bloquea)", aid)
     except Exception:
         _log.exception("precalentado de caché: error (no bloquea)")
 
 
-def _recalibrate():
-    """Reestima CP/W'/FTP del atleta si hay datos nuevos. Nunca revienta el
+def _recalibrate(athlete_id: int):
+    """Reestima CP/W'/FTP de ESE atleta si hay datos nuevos. Nunca revienta el
     bucle de sync: un fallo aquí no debe cortar la ingesta."""
     try:
         with session_scope() as session:
-            aid = first_athlete_id(session)
-            if aid is None:
-                return None
-            return autocalibrate(session, aid)
+            return autocalibrate(session, athlete_id)
     except Exception:
         _log.exception("autocalibración: error inesperado")
         return None
@@ -528,6 +544,11 @@ def create_app() -> FastAPI:
                 "model": cfg.llm_model,
                 "base_url": cfg.llm_base_url,
             },
+            # Conexión de Strava DE ESTE perfil: cada usuario conecta la suya.
+            "strava": {
+                "connected": load_tokens(session, "strava", aid) is not None,
+                "can_connect": bool(cfg.strava_client_id and cfg.strava_client_secret),
+            },
         }
 
     @app.get("/api/profile")
@@ -640,7 +661,7 @@ def create_app() -> FastAPI:
     def sync_full(aid: AID) -> dict[str, Any]:
         """Sincronización manual COMPLETA (con streams) — botón de Ajustes."""
         try:
-            r = sync_recent(fetch_streams=True)
+            r = sync_recent(athlete_id=aid, fetch_streams=True)
         except SyncError as exc:
             raise HTTPException(503, str(exc)) from exc
         return {
@@ -654,7 +675,9 @@ def create_app() -> FastAPI:
         """Sincroniza las actividades nuevas de Strava (incremental). La llama la
         app al abrir → el plan refleja la salida de hoy sin backfill manual."""
         try:
-            r = sync_recent(fetch_streams=False)   # rápido al abrir; streams en backfill/sync
+            # SIEMPRE con athlete_id: sin él, el perfil del padre sincronizaría
+            # la cuenta de Strava del hijo.
+            r = sync_recent(athlete_id=aid, fetch_streams=False)
         except SyncError as exc:
             raise HTTPException(503, str(exc)) from exc
         return {
@@ -717,6 +740,55 @@ def create_app() -> FastAPI:
         }
 
     # --- Autenticación (cuentas) ---------------------------------------------
+    # --- Conexión de Strava por PERFIL ---------------------------------------
+    # Cada perfil conecta SU cuenta. El flujo va por la web (no por `cc
+    # strava-auth`) porque los demás usuarios no tienen terminal.
+    def _redirect_uri(request: Request) -> str:
+        """Callback en el MISMO host por el que entró el usuario: localhost si
+        abre desde el PC, la IP de la LAN si abre desde el móvil."""
+        return str(request.base_url).rstrip("/") + "/api/strava/callback"
+
+    @app.get("/api/strava/authorize")
+    def strava_authorize(request: Request, session: DB, aid: AID) -> dict[str, Any]:
+        s = get_settings()
+        if not s.strava_client_id or not s.strava_client_secret:
+            raise HTTPException(503, "Faltan STRAVA_CLIENT_ID/SECRET en el .env.")
+        # `state` firmado y de vida corta: ata el callback a ESTE usuario (evita
+        # que un enlace ajeno enchufe una cuenta al perfil equivocado).
+        state = make_token(aid, get_or_create_secret(session), ttl=600)
+        url = build_authorize_url(s.strava_client_id, _redirect_uri(request))
+        return {"url": f"{url}&state={state}"}
+
+    @app.get("/api/strava/callback")
+    def strava_callback(
+        request: Request, session: DB, code: str | None = None,
+        state: str | None = None, error: str | None = None,
+    ) -> RedirectResponse:
+        if error or not code or not state:
+            return RedirectResponse("/?strava=error", status_code=303)
+        aid = parse_token(state, get_or_create_secret(session))
+        if aid is None:
+            return RedirectResponse("/?strava=expired", status_code=303)
+        s = get_settings()
+        try:
+            tokens = exchange_code(s.strava_client_id, s.strava_client_secret, code)
+        except Exception:
+            _log.exception("OAuth de Strava: fallo al canjear el código")
+            return RedirectResponse("/?strava=error", status_code=303)
+        # Una cuenta de Strava pertenece a UN perfil. Sin esto, autorizar por
+        # error con la cuenta de otro mezclaría dos personas en un mismo plan.
+        owner = account_owner(session, "strava", tokens.athlete_id or "")
+        if owner is not None and owner != aid:
+            return RedirectResponse("/?strava=taken", status_code=303)
+        save_tokens(session, aid, "strava", tokens)
+        return RedirectResponse("/?strava=ok", status_code=303)
+
+    @app.post("/api/strava/disconnect")
+    def strava_disconnect(session: DB, aid: AID) -> dict[str, Any]:
+        """Desconecta Strava de ESTE perfil. No borra los entrenamientos ya
+        importados: el historial es del atleta, no de la conexión."""
+        return {"ok": delete_account(session, aid, "strava")}
+
     @app.get("/api/me")
     def me(request: Request, session: DB) -> dict[str, Any]:
         """Estado de sesión: si la auth está activa y si hay sesión válida."""

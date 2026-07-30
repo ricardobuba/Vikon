@@ -532,3 +532,13 @@ nav button, .block, .hrow, .stat { transition: color .2s, background .2s, transf
 .ckmsg { display: block; text-align: center; font-size: 12px; color: var(--muted); margin-top: 6px; }
 .ckmsg.ok { color: var(--teal); }
 .ckmsg.bad { color: var(--red); }
+
+/* Aviso flotante al volver de un flujo externo (OAuth de Strava). */
+.toast {
+  position: fixed; left: 50%; bottom: 78px; transform: translateX(-50%);
+  max-width: 92vw; z-index: 60; padding: 11px 16px; border-radius: 12px;
+  font-size: 13px; font-weight: 600; color: #fff; text-align: center;
+  box-shadow: 0 8px 24px rgba(16, 42, 82, .22);
+}
+.toast.ok { background: var(--teal); }
+.toast.bad { background: var(--red); }

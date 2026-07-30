@@ -638,6 +638,7 @@ async function renderSettings() {
     ? `<div class="setrow"><span>${s.goal.name || "Evento"}</span><span class="v">${shortDate(s.goal.date)} · faltan ${s.goal.days_to} d</span></div>`
     : `<div class="sub">Sin objetivo. Añade uno para activar la periodización (fase/taper).</div>`;
   const llmHost = (() => { try { return new URL(s.llm.base_url).host; } catch { return s.llm.base_url; } })();
+  const st = s.strava || { connected: false, can_connect: false };
 
   box.innerHTML = `
     <div class="card"><h3>Perfil y disponibilidad</h3>
@@ -667,11 +668,20 @@ async function renderSettings() {
     </div>
 
     <div class="card"><h3>Datos</h3>
+      <div class="setrow"><span>Strava</span><span class="v">${st.connected
+        ? '<span class="stat-dot ok"></span>conectado' : '<span class="stat-dot warn"></span>sin conectar'}</span></div>
       <div class="setrow"><span>Actividades importadas</span><span class="v">${s.activities}</span></div>
       <div class="setrow"><span>Última actividad</span><span class="v">${s.last_activity ? shortDate(s.last_activity) : "—"}</span></div>
-      <div class="sub" style="margin:8px 0">Los entrenamientos entran solos desde Strava. Puedes forzar una sincronización ahora:</div>
-      <button id="sync-now" class="btn-full">${icon("refresh", 18)} Sincronizar con Strava</button>
-      <div id="sync-msg" class="sub"></div>
+      ${st.connected
+        ? `<div class="sub" style="margin:8px 0">Los entrenamientos entran solos desde Strava. Puedes forzar una sincronización ahora:</div>
+           <button id="sync-now" class="btn-full">${icon("refresh", 18)} Sincronizar con Strava</button>
+           <div id="sync-msg" class="sub"></div>
+           <button id="strava-off" class="btn-full" style="margin-top:8px;background:var(--card-2);color:var(--muted)">Desconectar Strava</button>`
+        : st.can_connect
+          ? `<div class="sub" style="margin:8px 0">Este perfil aún no tiene Strava. Conéctalo para que tus entrenamientos entren solos.</div>
+             <button id="strava-on" class="btn-full">Conectar mi Strava</button>`
+          : `<div class="sub" style="margin:8px 0">Faltan las credenciales de Strava en el archivo <code>.env</code> del servidor.</div>`}
+      <div id="strava-msg" class="sub"></div>
     </div>
 
     <div class="card"><h3>Vikon IA</h3>
@@ -720,7 +730,8 @@ async function renderSettings() {
     } catch (e) { $("#goal-msg").textContent = e.detail || "No se pudo guardar."; }
   });
 
-  $("#sync-now").addEventListener("click", async (ev) => {
+  const sync = $("#sync-now");
+  if (sync) sync.addEventListener("click", async (ev) => {
     const btn = ev.currentTarget; btn.disabled = true;
     $("#sync-msg").textContent = "Sincronizando con Strava…";
     try {
@@ -732,6 +743,52 @@ async function renderSettings() {
     } catch (e) { $("#sync-msg").textContent = e.detail || "No se pudo sincronizar (¿credenciales de Strava?)."; }
     finally { btn.disabled = false; }
   });
+
+  // Conectar Strava: cada perfil el suyo. Se sale a Strava y se vuelve al
+  // callback, que ata la cuenta a ESTE usuario por el `state` firmado.
+  const on = $("#strava-on");
+  if (on) on.addEventListener("click", async (ev) => {
+    ev.currentTarget.disabled = true;
+    $("#strava-msg").textContent = "Abriendo Strava…";
+    try {
+      const r = await api("/api/strava/authorize");
+      window.location.href = r.url;
+    } catch (e) {
+      $("#strava-msg").textContent = e.detail || "No se pudo iniciar la conexión.";
+      ev.currentTarget.disabled = false;
+    }
+  });
+
+  const off = $("#strava-off");
+  if (off) off.addEventListener("click", async () => {
+    if (!confirm("¿Desconectar Strava de este perfil?\n\nTus entrenamientos ya importados NO se borran.")) return;
+    try {
+      await api("/api/strava/disconnect", { method: "POST" });
+      renderSettings();
+    } catch (e) { $("#strava-msg").textContent = e.detail || "No se pudo desconectar."; }
+  });
+}
+
+// Resultado de volver del OAuth de Strava (?strava=...). Se limpia la URL para
+// que no reaparezca el mensaje al recargar.
+const STRAVA_BACK = {
+  ok: ["ok", "✓ Strava conectado. Tus entrenamientos empezarán a entrar solos."],
+  error: ["bad", "No se pudo conectar con Strava. Inténtalo otra vez."],
+  expired: ["bad", "La conexión caducó (tardó demasiado). Vuelve a intentarlo."],
+  taken: ["bad", "Esa cuenta de Strava ya está enlazada a otro perfil."],
+};
+
+function handleStravaReturn() {
+  const p = new URLSearchParams(window.location.search).get("strava");
+  if (!p) return;
+  history.replaceState({}, "", window.location.pathname);
+  const [cls, text] = STRAVA_BACK[p] || ["bad", "Respuesta desconocida de Strava."];
+  const el = document.createElement("div");
+  el.className = "toast " + cls;
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 6000);
+  if (p === "ok") { show("settings"); syncThenLoad(); }
 }
 
 // --- Acceso (login / registro) ----------------------------------------------
@@ -1070,6 +1127,7 @@ async function boot() {
   else syncThenLoad();
   // ¿Falta el check-in de hoy? Entonces el chat lo preguntará al abrirlo.
   try { checkinPending = (await api("/api/checkin")).pending; } catch (_) { /* da igual */ }
+  handleStravaReturn();          // ¿venimos de autorizar en Strava?
 }
 // PWA: registra el service worker para poder instalarla en el móvil.
 if ("serviceWorker" in navigator) {
