@@ -4,7 +4,7 @@
  * Solo cachea el "armazón" (HTML/CSS/JS/iconos) para que la app abra al
  * instante y muestre algo aunque no haya red.
  * OJO: al cambiar assets hay que subir la versión AQUÍ y en index.html. */
-const CACHE = "vikon-shell-v24";
+const CACHE = "vikon-shell-v25";
 const SHELL = [
   "/", "/static/styles.css?v=24", "/static/app.js?v=24",
   "/static/logo.png", "/static/manifest.webmanifest",

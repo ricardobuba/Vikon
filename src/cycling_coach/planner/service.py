@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from cycling_coach.db.repositories import (
+    get_athlete,
     get_availability,
     get_availability_overrides,
     get_plan_overrides,
@@ -125,10 +126,15 @@ def plan_horizon(
     chosen = get_plan_overrides(
         session, athlete_id, as_of, as_of + timedelta(days=days)
     )
+    athlete = get_athlete(session, athlete_id)
     return roll_horizon(
         ftp=ftp, ctl=current.ctl, atl=current.atl, context=ctx, cri=cri,
         days=days, start=as_of, days_to_event=days_to_event, minutes=minutes,
         daily_minutes=avail or None, date_minutes=overrides or None,
         date_objective=chosen or None,
         event_kind=goal.kind if goal else None,
+        # Cuántas horas QUIERE entrenar a la semana. Se recogía en el
+        # onboarding y no la usaba nadie: la disponibilidad es el techo por día,
+        # esto es el presupuesto del total.
+        weekly_minutes=(athlete.weekly_minutes_target if athlete else None),
     )

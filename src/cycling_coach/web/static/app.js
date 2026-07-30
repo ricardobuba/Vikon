@@ -900,7 +900,18 @@ function profileFormHtml(p, onboarding) {
     <div class="ob-sec">Disponibilidad semanal</div>
     <div class="lead" style="margin:-4px 2px 10px">Minutos que puedes entrenar cada día. Un día en 0 = descanso.</div>
     <div class="avail">${days}</div>
-    <div class="avail-total">Total semanal: <b id="av-sum">0:00</b> h</div>
+    <div class="avail-total">Total disponible: <b id="av-sum">0:00</b> h</div>
+
+    <div class="ob-sec">¿Cuánto quieres entrenar?</div>
+    <div class="lead" style="margin:-4px 2px 10px">Tener hueco no es querer entrenarlo.
+      Esto es el presupuesto de la semana: el plan no lo pasará.</div>
+    <div class="ckrow"><span>Objetivo semanal</span>
+      <!-- max amplio de salida: el navegador RECORTA el value al max al
+           parsear, y el tope real (la suma de tu disponibilidad) aún no se
+           conoce aquí. recompute() lo estrecha en cuanto se monta. -->
+      <input type="range" id="pf-weekly" min="0" max="2520" step="15"
+             value="${p.weekly_minutes_target ?? 480}" />
+      <b id="pf-weeklyl">—</b></div>
 
     <div class="ob-actions"><button id="pf-save">${onboarding ? "Empezar" : "Guardar"}</button></div>
     ${onboarding ? `<div class="ob-skip"><a id="pf-skip">Saltar por ahora</a></div>` : ""}
@@ -916,6 +927,7 @@ async function showProfile({ onboarding }) {
   $("#ob-card").innerHTML = profileFormHtml(p, onboarding);
   $("#onboarding").style.display = "flex";
   window.scrollTo(0, 0);
+  const wk = $("#pf-weekly"), wkl = $("#pf-weeklyl");
   const recompute = () => {
     let sum = 0;
     for (let i = 0; i < 7; i++) {
@@ -924,7 +936,13 @@ async function showProfile({ onboarding }) {
       $(`#avl-${i}`).textContent = v ? hhmm(v) : "libre";
     }
     $("#av-sum").textContent = hhmm(sum);
+    // El objetivo semanal no puede pedir más horas de las que tienes: su tope
+    // es la suma de la disponibilidad, y se recorta si bajas algún día.
+    wk.max = sum;
+    if (Number(wk.value) > sum) wk.value = sum;
+    wkl.textContent = hhmm(Number(wk.value)) + " h";
   };
+  wk.addEventListener("input", () => { wkl.textContent = hhmm(Number(wk.value)) + " h"; });
   for (let i = 0; i < 7; i++) $(`#av-${i}`).addEventListener("input", recompute);
   recompute();
   $("#pf-save").addEventListener("click", () => submitProfile(onboarding));
@@ -940,7 +958,7 @@ async function submitProfile(onboarding) {
     name: str("#pf-name"), level: str("#pf-level"), declared_ftp_w: num("#pf-ftp"),
     sex: str("#pf-sex"), birthdate: str("#pf-birth"), height_cm: num("#pf-height"),
     weight_kg: num("#pf-weight"), hr_max: num("#pf-hrmax"), hr_rest: num("#pf-hrrest"),
-    availability,
+    availability, weekly_minutes_target: num("#pf-weekly"),
     goal_name: str("#pf-goal-name"), goal_date: str("#pf-goal-date"),
     goal_kind: str("#pf-goal-kind"), goal_priority: $("#pf-goal-prio").value || "A",
   };

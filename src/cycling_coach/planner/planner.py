@@ -16,6 +16,7 @@ from enum import StrEnum
 
 from cycling_coach.planner.library import (
     LIBRARY,
+    LONG_RIDES,
     Objective,
     WorkoutTemplate,
     select_template,
@@ -88,6 +89,11 @@ LOW_AVAILABILITY_DAYS = 4
 # pide días LIBRES. Cadencia por defecto ~3 días de entreno + 1 de descanso (la
 # que sigue el dueño); al llegar a esta racha, el día suave pasa a descanso.
 MAX_DAYS_WITHOUT_REST = 3
+# Un día cuenta como "grande" (candidato al fondo largo, y mal sitio para gastar
+# el descanso) si tiene al menos esta fracción de tu mejor día. Exigir el máximo
+# EXACTO era demasiado estricto: con 360 min el lunes, un sábado de 300 —donde
+# el fondo cabe de sobra— no calificaba nunca y el día largo no salía jamás.
+BIG_DAY_FRACTION = 0.8
 
 # --- Principio de RECUPERACIÓN: semana de descarga (deload) ------------------
 # Tras varias semanas encadenadas construyendo carga, una semana más suave
@@ -598,8 +604,13 @@ def _endurance_variant(
 ) -> WorkoutTemplate:
     """Elige una variante de resistencia por longitud (variedad aeróbica, grieta
     del "Z2 para siempre"): 'short' la más corta, 'mid' intermedia, 'long' la más
-    larga que el modelo aún deja sobre tu suelo de forma. Respeta el tiempo."""
+    larga que el modelo aún deja sobre tu suelo de forma. Respeta el tiempo.
+
+    El día largo puede llegar a los fondos de 4-5 h (`LONG_RIDES`), que quedan
+    fuera de la escalera normal justamente para no alargar el rodaje de diario."""
     variants = LIBRARY[Objective.endurance].variants
+    if kind == "long":
+        variants = variants + LONG_RIDES
     cand = [v for v in variants if minutes is None or v.total_minutes() <= minutes]
     cand = cand or variants[:1]
     if kind == "short":
@@ -639,6 +650,7 @@ def roll_horizon(
     date_minutes: dict[date, int] | None = None,
     date_objective: dict[date, str] | None = None,
     event_kind: str | None = None,
+    weekly_minutes: float | None = None,
 ) -> list[HorizonDay]:
     """Proyecta `days` días encadenando `plan_session` y ARRASTRANDO el estado
     simulado (CTL/ATL) y la historia (duro/fácil emergente). Voraz por diseño:
@@ -649,6 +661,11 @@ def roll_horizon(
     disponibilidad; un día con 0 minutos se planifica como descanso. Si no se da,
     se usa `minutes` para todos. `date_minutes` (fecha → minutos) son EXCEPCIONES
     puntuales ("el sábado 9 no puedo") y mandan sobre la semanal.
+
+    `weekly_minutes` es CUÁNTO QUIERES ENTRENAR a la semana, que no es lo mismo
+    que cuánto tiempo tienes libre: la disponibilidad es un techo por día, esto
+    es el presupuesto del total. Sin él, marcar 36 h libres se leería como una
+    invitación a entrenarlas.
 
     Solo el día 0 se compromete; el resto es una proyección que se re-planifica
     al llegar datos reales (de ahí "deslizante"). La CRI es una señal de HOY: no
@@ -669,6 +686,7 @@ def roll_horizon(
     build_run = count_build_weeks(window) if len(window) >= 8 else 0
     prev_week_tss = sum(d.tss for d in recent[-7:]) or 0.0
     week_tss = 0.0
+    week_min = 0.0        # minutos ya comprometidos en la semana en curso
     deload_week = False
     week_budget: float | None = None
 
@@ -685,6 +703,7 @@ def roll_horizon(
                 prev_week_tss = week_tss
                 build_run = 0 if deload_week else build_run + 1
             week_tss = 0.0
+            week_min = 0.0
             # El taper ya descarga de por sí: no encadenamos las dos.
             deload_week = (
                 build_run >= DELOAD_AFTER_BUILD_WEEKS
@@ -738,7 +757,7 @@ def roll_horizon(
             # finde): es donde cabe de verdad y donde más rinde el volumen.
             big_day = (
                 daily_minutes is not None and md is not None
-                and md >= max(daily_minutes.values())
+                and md >= BIG_DAY_FRACTION * max(daily_minutes.values())
             )
             if since_long >= 6 or (big_day and since_long >= 3):
                 kind, since_long = "long", 0
@@ -759,7 +778,7 @@ def roll_horizon(
         streak = days_since_rest(recent)
         is_big_day = (
             daily_minutes is not None and md is not None
-            and md >= max(daily_minutes.values())
+            and md >= BIG_DAY_FRACTION * max(daily_minutes.values())
         )
         if phase is not Phase.race and (
             # Toca descansar y NO es un día grande: gastar el descanso en el día
@@ -827,6 +846,31 @@ def roll_horizon(
                            "por debajo de tu suelo de forma]")
                     ),
                 )
+
+        # Presupuesto SEMANAL de volumen: cuánto QUIERES entrenar, distinto de
+        # cuánto tiempo tienes. Si la sesión se pasa de lo que queda, se recorta
+        # conservando el tipo; si no cabe ni la más corta, el día es descanso.
+        # Sin esto, ampliar la biblioteca con tiradas largas convertiría una
+        # agenda holgada en un plan desmedido.
+        if weekly_minutes is not None and plan.objective is not Objective.rest:
+            left = weekly_minutes - week_min
+            if plan.template.total_minutes() > left:
+                fits = [
+                    v for v in LIBRARY[plan.objective].variants
+                    if v.total_minutes() <= left
+                ]
+                if fits:
+                    tmpl = fits[-1]
+                    plan = replace(
+                        plan, template=tmpl, targets=render_targets(tmpl, ftp),
+                        rationale=plan.rationale
+                        + f" [ajustado a tu objetivo semanal: quedan {left:.0f} min]",
+                    )
+                else:
+                    plan = rest_session(
+                        ftp, "descanso: ya has cubierto tu objetivo de horas de la semana"
+                    )
+        week_min += plan.template.total_minutes()
 
         tss = estimate_session_tss(plan.template)
         week_tss += tss

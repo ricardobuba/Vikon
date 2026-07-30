@@ -85,6 +85,17 @@ CHAT_MEMORY_DAYS = 7
 CHAT_CONTEXT_MESSAGES = 20
 _DAY_MINUTES_MAX = 600.0
 _DAY_NAMES = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
+# Nombres de día → weekday(). Con y sin tilde, cortos y en inglés: el LLM
+# alterna entre todos, y no podemos descartar un cambio por una tilde.
+_WEEKDAY_NAMES: dict[str, int] = {
+    "lunes": 0, "lun": 0, "monday": 0,
+    "martes": 1, "mar": 1, "tuesday": 1,
+    "miercoles": 2, "miércoles": 2, "mie": 2, "mié": 2, "wednesday": 2,
+    "jueves": 3, "jue": 3, "thursday": 3,
+    "viernes": 4, "vie": 4, "friday": 4,
+    "sabado": 5, "sábado": 5, "sab": 5, "sáb": 5, "saturday": 5,
+    "domingo": 6, "dom": 6, "sunday": 6,
+}
 
 
 @dataclass
@@ -208,23 +219,44 @@ def apply_activity(session: Session, athlete_id: int, act: dict, today: date) ->
     return applied
 
 
+def resolve_day(raw: object, today: date) -> date | None:
+    """Fecha desde lo que devuelva el LLM: ISO, "today"/"tomorrow" o el NOMBRE
+    de un día ("sábado") → el próximo con ese nombre.
+
+    Los nombres de día son imprescindibles: el ciclista dice "el sábado tengo 2
+    horas", no "el 2026-08-01". Sin esto el cambio se descartaba en silencio y
+    el chat respondía que no podía hacerlo."""
+    if raw is None:
+        return None
+    text = str(raw).strip().lower()
+    if text in ("today", "hoy"):
+        return today
+    if text in ("tomorrow", "mañana", "manana"):
+        return today + timedelta(days=1)
+    if text in ("pasado mañana", "pasado manana", "day_after_tomorrow"):
+        return today + timedelta(days=2)
+    try:
+        return date.fromisoformat(text)
+    except (TypeError, ValueError):
+        pass
+    wd = _WEEKDAY_NAMES.get(text.removeprefix("el ").strip())
+    if wd is None:
+        return None
+    # El PRÓXIMO día con ese nombre (si es hoy, se entiende hoy mismo).
+    return today + timedelta(days=(wd - today.weekday()) % 7)
+
+
 def apply_day_off(session: Session, athlete_id: int, spec: dict, today: date) -> dict:
     """Disponibilidad de un DÍA CONCRETO (excepción puntual). Manda sobre la
     disponibilidad semanal solo para esa fecha."""
-    raw, mins = spec.get("date"), spec.get("minutes")
+    mins = spec.get("minutes")
     if not isinstance(mins, int | float) or isinstance(mins, bool):
         return {}
     if not 0 <= mins <= _DAY_MINUTES_MAX:
         return {}
-    if raw == "today":
-        day = today
-    elif raw == "tomorrow":
-        day = today + timedelta(days=1)
-    else:
-        try:
-            day = date.fromisoformat(str(raw))
-        except (TypeError, ValueError):
-            return {}
+    day = resolve_day(spec.get("date"), today)
+    if day is None:
+        return {}
     set_availability_override(session, athlete_id, day, int(mins))
     return {"day": day.isoformat(), "minutes": int(mins)}
 
@@ -468,6 +500,8 @@ class ChatSession:
         block = facts.to_prompt()
         if logged:
             block += f"\n\nEl ciclista ACABA DE REGISTRAR (confírmalo): {_logged_note(logged)}."
+        if changed:
+            block += f"\n\nDATOS ACTUALIZADOS (confírmalo): {_changes_note(*changed)}."
         system = f"{EXPLAIN_SYSTEM}\n\nFICHA ACTUAL (única fuente de cifras):\n{block}"
         messages = [
             {"role": "system", "content": system},

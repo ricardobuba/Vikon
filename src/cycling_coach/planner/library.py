@@ -62,6 +62,19 @@ class WorkoutFamily:
         self.variants.sort(key=lambda t: t.total_minutes())
 
 
+# Las sesiones acaban en múltiplos de este paso. Un entreno que dura 93 minutos
+# es una cifra de hoja de cálculo, no algo que nadie planifique: se sale a rodar
+# hora y media. El ajuste se hace ALARGANDO LA VUELTA A LA CALMA, nunca tocando
+# los intervalos: la estructura del estímulo es fisiología y no se redondea.
+DURATION_STEP = 15
+
+
+def _round_up(total: float, step: int = DURATION_STEP) -> float:
+    """Minutos que faltan para llegar al siguiente múltiplo de `step`."""
+    resto = total % step
+    return 0.0 if resto == 0 else step - resto
+
+
 def _intervals(
     objective: Objective,
     label: str,
@@ -74,7 +87,13 @@ def _intervals(
     cooldown: float,
     rest: float,
 ) -> WorkoutTemplate:
-    """Construye una plantilla de intervalos: calentamiento + N×min + vuelta."""
+    """Construye una plantilla de intervalos: calentamiento + N×min + vuelta.
+
+    La vuelta a la calma se estira lo justo para que el TOTAL caiga en un
+    múltiplo de 15 min."""
+    work = warmup + reps * (minutes + rest) + cooldown
+    cooldown += _round_up(work)
+    total = int(warmup + reps * (minutes + rest) + cooldown)
     return WorkoutTemplate(
         id=f"{objective.value}-{reps}x{int(minutes)}",
         objective=objective,
@@ -85,7 +104,8 @@ def _intervals(
             Block("cooldown", cooldown, 55, 60),
         ],
         description=(
-            f"{label}: {reps}×{int(minutes)}' a {int(low)}–{int(high)}% FTP."
+            f"{label}: {reps}×{int(minutes)}' a {int(low)}–{int(high)}% FTP "
+            f"({total // 60}:{total % 60:02d} en total)."
         ),
     )
 
@@ -105,17 +125,24 @@ def _ladder(
 
 
 def _steady(
-    objective: Objective, label: str, minutes: float, low: float, high: float,
+    objective: Objective, label: str, total: float, low: float, high: float,
     *, warmup: float = 0.0, cooldown: float = 0.0,
 ) -> WorkoutTemplate:
-    """Bloque continuo (resistencia / recuperación), con calentamiento opcional."""
+    """Bloque continuo (resistencia / recuperación), con calentamiento opcional.
+
+    `total` es la duración de PUERTA A PUERTA, que es como se piensa el tiempo
+    disponible ("tengo dos horas"). El calentamiento y la vuelta salen de dentro,
+    no se suman por encima: así una sesión de 2 h dura 2 h, y no 2:20."""
+    minutes = total - warmup - cooldown
+    if minutes <= 0:
+        raise ValueError(f"{label}: {total} min no dan ni para calentar y enfriar")
     blocks: list[Block] = []
     if warmup:
         blocks.append(Block("warmup", warmup, 55, 65))
     blocks.append(Block("steady", minutes, low, high))
     if cooldown:
         blocks.append(Block("cooldown", cooldown, 55, 60))
-    total = int(minutes + warmup + cooldown)
+    total = int(total)
     return WorkoutTemplate(
         id=f"{objective.value}-{total}",
         objective=objective,
@@ -151,10 +178,15 @@ LIBRARY: dict[Objective, WorkoutFamily] = {
     Objective.endurance: WorkoutFamily(
         Objective.endurance, "Resistencia Z2",
         "Base aeróbica: construye fitness sin apenas fatiga.",
+        # Escalera de 30 en 30 sobre duraciones REDONDAS. En ciclismo el volumen
+        # es el estímulo principal, así que conviene que los escalones sean finos
+        # y que encajen en el hueco real: con 2 h libres debe caber una de 2 h,
+        # no quedarse en 1:50 por un calentamiento sumado por fuera.
         [
             _steady(Objective.endurance, "Resistencia Z2", 60, 65, 75, warmup=10, cooldown=10),
             _steady(Objective.endurance, "Resistencia Z2", 90, 65, 75, warmup=10, cooldown=10),
             _steady(Objective.endurance, "Resistencia Z2", 120, 65, 75, warmup=10, cooldown=10),
+            _steady(Objective.endurance, "Resistencia Z2", 150, 65, 75, warmup=10, cooldown=10),
             _steady(Objective.endurance, "Resistencia Z2", 180, 65, 75, warmup=10, cooldown=10),
         ],
     ),
@@ -164,7 +196,10 @@ LIBRARY: dict[Objective, WorkoutFamily] = {
         _ladder(
             Objective.sweet_spot, "Sweet Spot", 88, 93,
             warmup=15, cooldown=10, rest=5,
-            doses=[(3, 12), (3, 15), (4, 12), (4, 15)],
+            # El escalón corto existe para que un hueco de 1 h siga teniendo
+            # opción de calidad: si el mínimo fuera 1:30, quien entrena entre
+            # semana no haría intensidad nunca.
+            doses=[(2, 12), (3, 12), (3, 15), (4, 12), (4, 15)],
         ),
     ),
     Objective.threshold: WorkoutFamily(
@@ -173,7 +208,7 @@ LIBRARY: dict[Objective, WorkoutFamily] = {
         _ladder(
             Objective.threshold, "Umbral", 95, 100,
             warmup=15, cooldown=10, rest=5,
-            doses=[(3, 8), (3, 10), (4, 10), (4, 12)],
+            doses=[(3, 6), (3, 8), (3, 10), (4, 10), (4, 12)],
         ),
     ),
     Objective.vo2max: WorkoutFamily(
@@ -182,10 +217,26 @@ LIBRARY: dict[Objective, WorkoutFamily] = {
         _ladder(
             Objective.vo2max, "VO2máx", 110, 118,
             warmup=20, cooldown=10, rest=4,
-            doses=[(4, 4), (5, 4), (6, 4), (5, 5)],
+            doses=[(4, 3), (4, 4), (5, 4), (6, 4), (5, 5)],
         ),
     ),
 }
+
+
+# Tiradas largas de verdad, FUERA de la escalera normal a propósito.
+#
+# Si se metieran como variantes de la familia, `select_template` —que elige por
+# `fitness_pct * (n-1)`— reescalaría la dosis de TODOS los días: alargar la
+# lista subiría el rodaje habitual de 120 a 240 min sin que nadie lo pidiera.
+# Aquí solo las alcanza el DÍA LARGO, y únicamente si el tiempo disponible y la
+# simulación lo permiten. La duración es el estímulo de ese día, así que es el
+# único donde debe escalar con el tiempo real.
+LONG_RIDES: list[WorkoutTemplate] = [
+    _steady(Objective.endurance, "Fondo largo", 210, 63, 73, warmup=10, cooldown=10),
+    _steady(Objective.endurance, "Fondo largo", 240, 62, 72, warmup=10, cooldown=10),
+    _steady(Objective.endurance, "Fondo largo", 300, 60, 70, warmup=10, cooldown=10),
+    _steady(Objective.endurance, "Fondo largo", 360, 60, 70, warmup=10, cooldown=10),
+]
 
 
 def select_template(
