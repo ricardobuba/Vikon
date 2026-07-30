@@ -156,6 +156,36 @@ funciones: hace falta una VM pequeña que no se duerma.
 
 ---
 
+## 4b. Presupuesto de rendimiento
+
+Sin cifras, "va rápido" es una opinión. Estos son los topes; si algún cambio los
+supera, es un fallo, no un matiz:
+
+| Métrica | Tope | Hoy |
+|---|---|---|
+| `/api/state` con caché caliente | **< 200 ms** | 86 ms ✓ |
+| Primera pantalla tras abrir la app | **< 1 s** | 0,6 s ✓ |
+| Arranque del servidor (cualquier nº de usuarios) | **< 1 s** | ~2 s × usuarios ✗ |
+| Primera petición de un usuario tras reiniciar | **< 300 ms** | 2,2 s ✗ |
+
+Los dos últimos son los que arregla la Fase 1. Y ojo al orden: **el precalentado
+perezoso (1.5) sin la MMP persistida (1.1) EMPEORA la cuarta fila** — pasaría a
+cobrarle los 2,2 s al primero que entre tras cada despliegue, que hoy no ocurre
+porque se precalienta de fondo al arrancar.
+
+Tres cosas de producción que también castigan la carga y no dependen del código:
+
+- **Máquina dormida.** Si el host apaga la instancia por inactividad, el primer
+  acceso paga el arranque completo. Debe quedar siempre despierta.
+- **Región.** Servir desde EE. UU. añade cientos de ms por petición desde
+  España. Madrid o Frankfurt — y de paso lo pide el RGPD.
+- **El cumplimiento crece.** Hoy cuesta 1,1 ms porque `plan_log` casi está
+  vacío; con 14 días registrados clasificará 14 sesiones (cargando sus streams)
+  dentro de `/api/state`. Acotado, pero es lo siguiente que se notará: cuando
+  pase de 50 ms, se calcula fuera del camino de la petición.
+
+---
+
 ## 5. Arquitectura objetivo
 
 ```
