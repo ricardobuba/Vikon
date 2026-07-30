@@ -20,30 +20,83 @@ infraestructura y tres cambios de código que la escala obliga.
 
 ## 2. La restricción que manda: Strava
 
-Medido sobre datos reales, no estimado:
+La primera medición asustaba: **~3.644 peticiones** para el backfill de un
+usuario, contra un límite de ~2.000/día **por aplicación**. Un alta nueva
+agotaba la cuota diaria entera.
+
+Pero al mirar de dónde salían, la cosa cambia por completo:
+
+| Qué se pide | Peticiones | Tamaño |
+|---|---|---|
+| **Metadatos** de TODO el historial (1.822 act.) | **~10** | 6 MB |
+| **Streams**, una petición por actividad | ~1.822 | 204 MB |
+
+Strava devuelve los resúmenes **en páginas de 200**, así que el historial
+entero de metadatos cuesta diez peticiones. Los streams son el 99,7% del coste
+y el 97% del espacio.
+
+**No hay que recortar el historial: hay que recortar los streams.** Medido:
+
+| | Actividades | Peticiones | Streams |
+|---|---|---|---|
+| Historial completo (2017-2026) | 1.822 | ~1.832 | 204 MB |
+| **Metadatos completos + streams de 12 meses** | 1.822 | **~239** | **22 MB** |
+
+**15x menos peticiones**, y cabe de sobra en la cuota de un día.
+
+Lo importante es que esto **no sacrifica análisis**: el histórico de CTL/ATL/TSB,
+los umbrales personalizados y el percentil de forma salen de los METADATOS, que
+se conservan enteros. Eso respeta la decisión de "usa todos los datos", tomada
+precisamente porque un año flojo no debe borrar la capacidad de fondo.
+
+El resto de medidas siguen en pie:
+
+- **Backfill en cola con cubo de fichas** que respeta 200/15 min.
+- **Prioridad por utilidad**: metadatos primero (el plan de hoy ya funciona con
+  ellos), streams recientes después.
+- **Progreso honesto en la UI**, sin fingir que ya está.
+- **Pedir ampliación de límite** a Strava cuando haya usuarios reales.
+
+---
+
+## 2b. La pieza que lo resuelve todo: guardar la MMP, no el stream
+
+El motor de CP **no consume el stream crudo**: consume su curva de potencia
+máxima media (MMP). Medido:
 
 | | |
 |---|---|
-| Actividades del backfill inicial (1 usuario) | **1.822** |
-| Peticiones que eso cuesta (actividad + streams) | **~3.644** |
-| Límite de Strava **por aplicación**, no por usuario | ~200/15 min · **~2.000/día** |
+| Stream crudo de una actividad | ~110 KB |
+| Su MMP (10 duraciones) | **80 bytes** |
+| MMP de las 1.051 actividades con potencia | **0,08 MB** |
 
-**Un solo usuario nuevo se come la cuota diaria entera de toda la app.** Con
-diez altas en una semana, el servicio se atasca y nadie sincroniza.
+Y el precalentado, perfilado:
 
-Esto deja de ser un detalle de implementación y pasa a ser la pieza central del
-diseño. Consecuencias, todas obligatorias:
+```
+smoothed_cp_states  2,19 s en frío   (7,8 s con el disco realmente frío)
+   ├── cargar streams de BD + limpiar + calcular MMP ... ~2,2 s   ← TODO está aquí
+   └── filtro de Kalman ............................... despreciable
+```
 
-- **El backfill deja de ser síncrono** y pasa a una **cola con cubo de fichas**
-  que respeta 200/15 min. Un usuario nuevo se importa a lo largo de horas o días.
-- **Prioridad por utilidad**: primero las actividades recientes (CTL/ATL y el
-  plan de hoy dependen de ellas), después hacia atrás. El usuario tiene un plan
-  útil en minutos aunque su historial tarde días.
-- **Los streams, solo donde hacen falta**: últimos ~180 días para la curva de
-  potencia, más los tests maximales marcados. El resto, metadatos.
-- **Progreso honesto en la UI**: "importando tu historial: 340/1.822". Nada de
-  fingir que ya está.
-- **Pedir ampliación de límite** a Strava en cuanto haya usuarios reales.
+**El coste entero es cargar 204 MB para volver a derivar unos números que ya
+calculamos ayer.** Si la MMP se persiste al ingerir, el precalentado pasa a leer
+0,08 MB y el filtro es instantáneo.
+
+De ahí sale el modelo de retención:
+
+| Dato | Se guarda | Para qué |
+|---|---|---|
+| **Metadatos** de actividad | siempre | TSS, CTL/ATL/TSB, umbrales, cumplimiento |
+| **MMP** derivada | siempre (80 B) | CP/W'/FTP, curva de potencia, coherencia |
+| **Stream crudo** | últimos 12 meses | zonas e intervalos (clasificar la sesión) |
+
+Con eso: **~9 MB por usuario** (6 metadatos + 2,4 de streams comprimidos + 0,08
+de MMP) y precalentado en milisegundos.
+
+Nota sobre tus datos: tú ya tienes los 204 MB descargados. No se tiran sin más
+— primero se calcula la MMP de **todo** el historial (2017-2026), y solo después
+se sueltan los streams antiguos. Así conservas la trayectoria de CP completa,
+que un usuario nuevo no podrá tener.
 
 ### Antes que nada: los términos
 
@@ -59,20 +112,20 @@ el cambio es acotado — pero conviene saberlo antes, no después.
 
 ---
 
-## 3. Almacenamiento: comprimir los streams
+## 3. Almacenamiento: comprimir lo que quede
 
-Medido sobre la BD real:
+Aun con retención de 12 meses, los streams que se guardan siguen siendo el
+grueso. Medido sobre la BD real:
 
 | | Tamaño |
 |---|---|
-| BD completa (1 usuario) | **219 MB** |
-| De los cuales, tabla `stream` | **204 MB** |
+| BD completa (1 usuario) | 219 MB |
+| Tabla `stream` | 204 MB |
 | Streams en JSON + gzip | 49 MB (4,2x) |
 | Streams en **binario + zlib** | **22 MB (9,3x)** |
 
-Los vatios son enteros pequeños: guardarlos como JSON es pagar ~9x de más.
-Comprimir baja el coste de "2 usuarios por capa gratuita" a "~20", y abarata
-la migración inicial.
+Los vatios son enteros pequeños: guardarlos como JSON cuesta ~9x de más.
+Aplicado a los 22 MB de los últimos 12 meses, quedan **~2,4 MB por usuario**.
 
 Decisión: `stream.data` pasa de JSONB a `bytea` comprimido, con la
 serialización encapsulada en el repositorio para que nada más se entere.
@@ -84,9 +137,13 @@ serialización encapsulada en el repositorio para que nada más se entere.
 Salen de leer el código actual, no de suponer:
 
 **(a) El precalentado de caché es O(usuarios).** `_warm_cache()` recorre todos
-los atletas con actividades y cada uno cuesta ~8 s. Con 50 usuarios son ~7
-minutos de CPU en cada arranque. Debe pasar a **perezoso** (al primer uso de ese
-atleta) o a un trabajo programado, no al arranque.
+los atletas con actividades, a ~2-8 s cada uno. Con 50 usuarios son minutos de
+CPU en cada arranque, y el problema crece con las altas.
+
+Con la MMP persistida (§2b) el trabajo desaparece casi entero, pero aun así
+conviene que **no sea al arranque**: pasa a perezoso, la primera vez que ese
+atleta pide algo. Así el servidor levanta al instante y nadie paga por usuarios
+que hoy no van a entrar.
 
 **(b) La caché de CP vive en el proceso.** `_SMOOTH_CACHE` es un dict en
 memoria. Con una sola instancia es correcto; el día que haya dos, cada una
@@ -136,13 +193,35 @@ Condiciona todo lo demás. No empieces por otra cosa.
 
 ### Fase 1 — Preparar el código *(mío)*
 
-Sin tocar infraestructura todavía, y todo verificable en local:
+Sin tocar infraestructura todavía, todo verificable en local y con una métrica
+de éxito por paso. En este orden, porque cada uno apoya al siguiente:
 
-1. Compresión de streams + migración idempotente de los existentes.
-2. Cola de backfill con cubo de fichas y prioridad por recencia.
-3. Precalentado perezoso en vez de al arranque.
-4. Configuración por variables de entorno (hoy hay cosas que asumen `.env`).
-5. `healthcheck` para que el host sepa si la app está viva.
+**1.1 — Persistir la MMP.** Tabla `activity_mmp` (activity_id, duración →
+vatios). Se calcula al ingerir y se rellena hacia atrás para lo ya existente.
+`load_power_activities` deja de leer streams y pasa a leer MMP.
+→ *Éxito: `smoothed_cp_states` baja de ~2,2 s a <100 ms, y el CP estimado no
+cambia (mismo número, mismo intervalo).* Esa segunda parte es la que importa:
+si cambia, la refactorización está mal.
+
+**1.2 — Retención de streams.** Política de 12 meses: al ingerir no se piden
+streams más antiguos; los existentes se sueltan **después** de tener su MMP.
+Lo que sigue necesitando stream crudo (clasificar zonas e intervalos) solo mira
+días recientes, así que no se rompe.
+→ *Éxito: la BD baja de 219 MB a ~30 MB sin que cambie ni el CP ni el plan.*
+
+**1.3 — Comprimir los streams que quedan.** JSONB → `bytea` con zlib.
+→ *Éxito: ~9x menos, y los tests de clasificación siguen pasando.*
+
+**1.4 — Cola de backfill con cubo de fichas.** Respeta 200/15 min, prioriza
+metadatos y luego streams recientes, y expone progreso.
+→ *Éxito: un alta nueva consume ~240 peticiones y deja plan útil en minutos.*
+
+**1.5 — Precalentado perezoso** + `healthcheck` + configuración por variables
+de entorno.
+→ *Éxito: el servidor levanta en <1 s con N usuarios.*
+
+Los pasos 1.1 y 1.2 son los que responden a lo que pediste: ingerir solo el
+último año **sin perder análisis**, y un precalentado rápido de verdad.
 
 ### Fase 2 — Endurecer *(mío)*
 
@@ -192,9 +271,12 @@ despliegue · healthcheck · verificación de que todo sigue funcionando.
 
 ## 8. Coste
 
+Con ~9 MB por usuario (§2b), una capa gratuita de 500 MB da para **unos 50
+usuarios** antes de pagar nada de BD.
+
 | Partida | Arranque | Con ~20 usuarios |
 |---|---|---|
-| Postgres (Neon) | 0 € | 0 € (gracias a comprimir) |
+| Postgres (Neon) | 0 € | 0 € |
 | Servidor (Fly.io) | ~5 €/mes | ~5-7 €/mes |
 | Dominio | ~10 €/año | ~10 €/año |
 | LLM | ~0 € (capa gratuita) | **a medir** |
