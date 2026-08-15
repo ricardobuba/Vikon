@@ -72,7 +72,14 @@ def map_activity(raw: dict) -> CanonicalActivity:
         kilojoules=raw.get("kilojoules"),
         device_watts=raw.get("device_watts"),
         trainer=raw.get("trainer"),
-        raw=raw,
+        # `raw` se DESCARTA a propósito. El payload de Strava trae
+        # `start_latlng`, `end_latlng` y `map.summary_polyline`: el trazado
+        # completo de la ruta y, con él, el domicilio del atleta. Ningún
+        # consumidor del proyecto lo lee jamás (solo se escribía y se purgaba),
+        # así que guardarlo era recoger el dato más sensible del sistema sin
+        # ninguna finalidad. Minimización (RGPD art. 5.1.c) y límite de caché de
+        # la API Policy de Strava (§6.2). Ver BLINDAJE_LEGAL_Plan.md.
+        raw={},
     )
 
 

@@ -52,6 +52,23 @@ class Settings(BaseSettings):
     # (usa el primer atleta, como antes).
     auth_enabled: bool = True
 
+    # Cookie de sesión sobre HTTPS únicamente. En false mientras la app se
+    # sirva por HTTP en la LAN (si no, el navegador descarta la cookie y te
+    # deja fuera). Ponlo a true el día que haya HTTPS: sin él, la cookie de
+    # sesión viaja en claro por la red.
+    cookie_secure: bool = False
+
+    # Documentación interactiva de la API (/api/docs y /openapi.json). Útil en
+    # desarrollo; publicada es regalar el mapa completo de endpoints.
+    api_docs: bool = True
+
+    # Retención de los streams crudos (series a 1 Hz), en días. Decisión de
+    # producto, no constante técnica: bajarla acerca a la caché de 7 días que
+    # pide la API Policy de Strava (§6.2), pero apaga el detalle por zonas del
+    # histórico (el motor de CP no se ve afectado: consume la MMP persistida).
+    # Ver `retention.py` y BLINDAJE_LEGAL_Plan.md §3.
+    stream_retention_days: int = 365
+
     @property
     def strava_redirect_uri(self) -> str:
         return f"http://localhost:{self.oauth_port}/callback"

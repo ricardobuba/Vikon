@@ -6,9 +6,9 @@ restricciones únicas naturales (provider_activity_id, etc.).
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -558,10 +558,25 @@ def get_user_by_username(session: Session, username: str) -> User | None:
 
 
 def create_user(
-    session: Session, username: str, pw_hash: str, pw_salt: str, athlete_id: int
+    session: Session,
+    username: str,
+    pw_hash: str,
+    pw_salt: str,
+    athlete_id: int,
+    *,
+    terms_version: str | None = None,
+    ai_consent: bool = False,
 ) -> User:
+    """Alta de cuenta. `terms_version`/`ai_consent` dejan CONSTANCIA del
+    consentimiento con su fecha: el RGPD (art. 7.1) exige poder demostrarlo,
+    y sin la versión no se sabe a qué texto dijo que sí."""
+    now = datetime.now(UTC)
     user = User(
-        username=username, pw_hash=pw_hash, pw_salt=pw_salt, athlete_id=athlete_id
+        username=username, pw_hash=pw_hash, pw_salt=pw_salt, athlete_id=athlete_id,
+        terms_accepted_at=now if terms_version else None,
+        terms_version=terms_version,
+        ai_consent=ai_consent,
+        ai_consent_at=now if ai_consent else None,
     )
     session.add(user)
     session.flush()
@@ -732,6 +747,55 @@ def purge_old_chat(session: Session, athlete_id: int, before: datetime) -> None:
             ChatMessage.athlete_id == athlete_id, ChatMessage.created_at < before
         )
     )
+
+
+# --- Retención de datos de Strava (BLINDAJE_LEGAL_Plan.md #3) ---------------
+# La API Policy de Strava exige reflejar el borrado en <=48h y purgar del todo
+# en <=30 dias cuando el usuario desconecta la cuenta o pide sus datos fuera.
+# Lo que purgamos aqui es el material CRUDO/voluminoso (streams con series
+# temporales completas, y el JSON crudo de la actividad con GPS/polyline);
+# las columnas tipadas de `activity` (potencia media, TSS-relevantes) se
+# conservan como historial de RENDIMIENTO PROPIO del atleta, ya que el motor
+# de CTL/ATL/TSB las lee en vivo (twin/load_service.py) y no hay una capa
+# derivada separada que las sustituya. Es una decision de producto explicita,
+# no un descuido: ver BLINDAJE_LEGAL_Plan.md #3 para el porque y la reserva.
+def delete_streams_for_athlete(session: Session, athlete_id: int) -> int:
+    """Borra TODOS los streams (series temporales crudas) del atleta. Devuelve
+    cuantas filas se borraron."""
+    result = session.execute(
+        delete(Stream).where(
+            Stream.activity_id.in_(
+                select(Activity.id).where(Activity.athlete_id == athlete_id)
+            )
+        )
+    )
+    return result.rowcount or 0
+
+
+def delete_streams_older_than(session: Session, athlete_id: int, before: date) -> int:
+    """Borra los streams de actividades anteriores a `before` (ventana de
+    retencion de streams, p. ej. 12 meses — ver DESPLIEGUE_Plan.md)."""
+    result = session.execute(
+        delete(Stream).where(
+            Stream.activity_id.in_(
+                select(Activity.id).where(
+                    Activity.athlete_id == athlete_id,
+                    Activity.start_time < before,
+                )
+            )
+        )
+    )
+    return result.rowcount or 0
+
+
+def clear_activity_raw_payloads(session: Session, athlete_id: int) -> int:
+    """Vacia `activity.raw` (el JSON crudo de Strava: GPS, polyline, texto
+    libre...) de todas las actividades del atleta, sin tocar las columnas
+    tipadas que el motor necesita. Devuelve cuantas filas se tocaron."""
+    result = session.execute(
+        update(Activity).where(Activity.athlete_id == athlete_id).values(raw={})
+    )
+    return result.rowcount or 0
 
 
 def activity_exists(session: Session, provider: str, provider_activity_id: str) -> bool:

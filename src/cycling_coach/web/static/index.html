@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Vikon</title>
-  <link rel="icon" href="/static/favicon.ico?v=25" sizes="16x16 32x32 48x48" />
-  <link rel="icon" type="image/png" href="/static/icon-192.png?v=25" sizes="192x192" />
+  <link rel="icon" href="/static/favicon.ico?v=26" sizes="16x16 32x32 48x48" />
+  <link rel="icon" type="image/png" href="/static/icon-192.png?v=26" sizes="192x192" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -14,14 +14,14 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Vikon" />
-  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=25" />
-  <link rel="stylesheet" href="/static/styles.css?v=25" />
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=26" />
+  <link rel="stylesheet" href="/static/styles.css?v=26" />
 </head>
 <body>
   <div class="app">
     <header>
       <img src="/static/logo.png" alt="Vikon" />
-      <div class="brand"><span>Vikon</span></div>
+      <div class="brand"><span>VIKON</span></div>
       <div class="date" id="today"></div>
       <button id="gear" class="gear" title="Ajustes" aria-label="Ajustes"></button>
     </header>
@@ -45,6 +45,14 @@
 
       <!-- CHAT -->
       <section id="chat-view">
+        <!-- Aviso de IA: art. 50 del Reglamento (UE) 2024/1689, exigible desde
+             el 2-08-2026. Las Guidelines de la Comisión interpretan de forma
+             restrictiva la excepción de "es obvio": que el usuario ya lo sepa
+             NO exime, y enterrarlo en los términos no vale. -->
+        <div class="ai-notice" role="note">
+          Hablas con un asistente de <strong>IA</strong>. El motor decide el
+          entrenamiento; la IA solo lo explica y puede equivocarse.
+        </div>
         <div class="chat-log" id="chat-log">
           <div class="msg bot">¡Hola! Soy Vikon. Pregúntame qué toca hoy, dime cuánto tiempo tienes, cómo te encuentras, o registra tu peso y sueño.</div>
         </div>
@@ -89,6 +97,6 @@
       <button data-view="chat" data-icon="chat"><span class="ico"></span>Vikon</button>
     </nav>
   </div>
-  <script src="/static/app.js?v=25"></script>
+  <script src="/static/app.js?v=26"></script>
 </body>
 </html>

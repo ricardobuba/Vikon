@@ -2,6 +2,10 @@
 const $ = (s) => document.querySelector(s);
 const api = (p, opts) => fetch(p, opts).then((r) => r.ok ? r.json() : r.json().then((e) => Promise.reject(e)));
 const fmt = (v, d = 0) => (v == null ? "—" : Number(v).toFixed(d));
+// Versión de los textos legales que el usuario acepta al registrarse. Se guarda
+// junto a la fecha: sin esto no se puede demostrar A QUÉ TEXTO dijo que sí.
+// Subirla al cambiar privacidad.html o terminos.html de forma sustancial.
+const LEGAL_VERSION = "1.0";
 const signed = (v) => (v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(0));
 const shortDate = (iso) => new Date(iso).toLocaleDateString("es-ES", { day: "numeric", month: "short" });
 // Duración en H:MM (formato único en toda la app). 95 → "1:35", 45 → "0:45".
@@ -692,6 +696,19 @@ async function renderSettings() {
       ${s.llm.configured ? "" : `<div class="sub" style="margin-top:8px">Añade tu clave en el archivo <code>.env</code> para activar el chat.</div>`}
     </div>
 
+    <div class="card"><h3>Legal</h3>
+      <div class="sub">Vikon planifica entrenamiento deportivo. <strong>No es consejo médico</strong>: consulta a tu médico antes de empezar, y para si notas dolor en el pecho, mareo o falta de aire.</div>
+      <div class="setrow"><span>Privacidad</span><span class="v"><a href="/static/privacidad.html" target="_blank" rel="noopener">Ver</a></span></div>
+      <div class="setrow"><span>Términos de servicio</span><span class="v"><a href="/static/terminos.html" target="_blank" rel="noopener">Ver</a></span></div>
+    </div>
+
+    <div class="card"><h3>Tus datos</h3>
+      <div class="sub">Puedes llevarte todo lo que Vikon guarda sobre ti, o borrarlo por completo.</div>
+      <button id="export-data" class="btn-full" style="margin-top:12px;background:var(--card-2);color:var(--text)">Descargar mis datos</button>
+      <button id="delete-account" class="btn-full" style="margin-top:8px;background:var(--card-2);color:#C0392B">Borrar mi cuenta</button>
+      <div id="account-msg" class="sub" style="margin-top:8px"></div>
+    </div>
+
     <div class="card"><h3>Cuenta</h3>
       <div class="sub">Vikon · entrenador de ciclismo con gemelo digital. El motor decide; la IA explica.</div>
       <button id="logout-btn" class="btn-full" style="margin-top:12px;background:var(--card-2);color:var(--text)">Cerrar sesión</button>
@@ -699,6 +716,11 @@ async function renderSettings() {
 
   $("#edit-profile").addEventListener("click", () => showProfile({ onboarding: false }));
   $("#logout-btn").addEventListener("click", logout);
+  $("#export-data").addEventListener("click", () => {
+    // Descarga directa: el endpoint ya manda Content-Disposition.
+    window.location.href = "/api/account/export";
+  });
+  $("#delete-account").addEventListener("click", deleteAccount);
   const cal = $("#calib-now");
   if (cal) cal.addEventListener("click", async (ev) => {
     const btn = ev.currentTarget, msg = $("#calib-msg");
@@ -798,10 +820,21 @@ function showAuth(hasUsers) {
     const username = $("#au-user").value.trim(), password = $("#au-pass").value;
     if (!username || !password) { $("#au-msg").textContent = "Rellena usuario y contraseña."; return; }
     const btn = $("#au-submit"); btn.disabled = true;
+    const body = { username, password };
+    if (mode === "register") {
+      const consent = $("#au-consent");
+      if (!consent || !consent.checked) {
+        $("#au-msg").textContent = "Necesitas aceptar los términos para crear la cuenta.";
+        btn.disabled = false; return;
+      }
+      body.accepted_terms = true;
+      body.terms_version = LEGAL_VERSION;
+      body.ai_consent = !!($("#au-consent-ai") && $("#au-consent-ai").checked);
+    }
     try {
       await api("/api/" + mode, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(body),
       });
       $("#auth").style.display = "none";
       // PWA: registra el service worker para poder instalarla en el móvil.
@@ -822,10 +855,34 @@ boot();                       // ahora autenticado → onboarding o app
       <div class="field"><label>Contraseña</label>
         <input id="au-pass" type="password" placeholder="••••••"
           autocomplete="${mode === "login" ? "current-password" : "new-password"}" /></div>
+      ${mode === "register" ? `
+      <label class="consent">
+        <input type="checkbox" id="au-consent" />
+        <span>He leído los <a href="/static/terminos.html" target="_blank" rel="noopener">términos</a>
+        y la <a href="/static/privacidad.html" target="_blank" rel="noopener">política de privacidad</a>,
+        y consiento el tratamiento de mis <strong>datos de salud</strong> (pulso, peso, sueño)
+        para calcular mi entrenamiento.</span>
+      </label>
+      <label class="consent">
+        <input type="checkbox" id="au-consent-ai" />
+        <span>Consiento que mis métricas se envíen a un proveedor de <strong>IA</strong>
+        para redactar las explicaciones. <em>Opcional: Vikon funciona entero sin esto.</em></span>
+      </label>` : ""}
       <div class="ob-actions"><button id="au-submit">${mode === "login" ? "Entrar" : "Crear cuenta"}</button></div>
       <div class="ob-skip"><a id="au-toggle">${mode === "login"
         ? "¿No tienes cuenta? Crear una" : "¿Ya tienes cuenta? Entrar"}</a></div>
+      ${mode === "login" ? `<div class="ob-skip" style="margin-top:6px">
+        <a href="/static/privacidad.html" target="_blank" rel="noopener">Privacidad</a> ·
+        <a href="/static/terminos.html" target="_blank" rel="noopener">Términos</a></div>` : ""}
       <div id="au-msg"></div>`;
+    // El consentimiento de datos de salud (RGPD art. 9.2.a) tiene que ser una
+    // acción afirmativa: casilla sin premarcar y botón bloqueado hasta marcarla.
+    const consent = $("#au-consent");
+    if (consent) {
+      const submitBtn = $("#au-submit");
+      submitBtn.disabled = true;
+      consent.addEventListener("change", () => { submitBtn.disabled = !consent.checked; });
+    }
     $("#au-submit").addEventListener("click", submit);
     $("#au-toggle").addEventListener("click", () => { mode = mode === "login" ? "register" : "login"; render(); });
     $("#au-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
@@ -844,6 +901,31 @@ if ("serviceWorker" in navigator) {
 }
 
 boot();
+}
+
+// --- Borrado de cuenta (RGPD art. 17) ---------------------------------------
+// Dos confirmaciones a propósito: es irreversible y se lleva años de historial.
+// La contraseña la valida el servidor; una cookie robada no debe bastar.
+async function deleteAccount() {
+  const msg = $("#account-msg");
+  if (!confirm(
+    "Vas a borrar tu cuenta y TODOS tus datos: entrenamientos, métricas, " +
+    "planes y conversaciones.\n\nEsto no se puede deshacer. ¿Seguro?"
+  )) return;
+  const password = prompt("Escribe tu contraseña para confirmar el borrado:");
+  if (!password) return;
+  msg.textContent = "Borrando…";
+  try {
+    await api("/api/account", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    alert("Cuenta borrada. Gracias por haber usado Vikon.");
+    location.reload();
+  } catch (e) {
+    msg.textContent = e.message || "No se pudo borrar la cuenta.";
+  }
 }
 
 // --- Perfil / onboarding ----------------------------------------------------

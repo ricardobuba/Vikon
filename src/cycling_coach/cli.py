@@ -588,6 +588,46 @@ def backfill_mmp_cmd(
 
 
 # --------------------------------------------------------------------------- #
+@app.command("retention")
+def retention_cmd(
+    purge_raw: bool = typer.Option(
+        False, "--purge-raw",
+        help="Vacía además el JSON crudo de Strava que quedara de antes (GPS/polilínea).",
+    ),
+) -> None:
+    """Aplica la política de retención: poda el chat y borra los streams viejos.
+
+    El servidor ya la ejecuta solo mientras corre; este comando es para
+    aplicarla a mano o desde el programador de tareas. Ver `retention.py`."""
+    from cycling_coach.db.repositories import (
+        athlete_ids_with_activities,
+        clear_activity_raw_payloads,
+    )
+    from cycling_coach.retention import CHAT_RETENTION_DAYS, apply_retention
+
+    with session_scope() as session:
+        report = apply_retention(session)
+        typer.secho(
+            f"streams borrados: {report.streams_deleted} "
+            f"(ventana {report.stream_window_days} días) · "
+            f"chat podado en {report.chat_purged_for} perfiles "
+            f"(ventana {CHAT_RETENTION_DAYS} días)",
+            fg=typer.colors.GREEN,
+        )
+        if purge_raw:
+            # Solo vacía `activity.raw`; NO toca los streams (eso es la purga
+            # de desconexión, `accounts.purge_raw_strava_data`).
+            total = sum(
+                clear_activity_raw_payloads(session, aid)
+                for aid in athlete_ids_with_activities(session)
+            )
+            typer.secho(
+                f"JSON crudo de Strava vaciado en {total} actividades ✔",
+                fg=typer.colors.GREEN,
+            )
+
+
+# --------------------------------------------------------------------------- #
 @app.command("checkin")
 def checkin(
     sleep: float = typer.Option(None, help="Horas de sueño anoche."),

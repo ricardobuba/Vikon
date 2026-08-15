@@ -49,6 +49,12 @@ _ADD_COLUMNS = [
     "ALTER TABLE athlete ADD COLUMN IF NOT EXISTS hr_rest integer",
     "ALTER TABLE athlete ADD COLUMN IF NOT EXISTS weekly_minutes_target integer",
     "ALTER TABLE athlete ADD COLUMN IF NOT EXISTS onboarded boolean NOT NULL DEFAULT false",
+    # Prueba del consentimiento (RGPD art. 7.1). Ver `User` en models.py.
+    "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS terms_accepted_at timestamptz",
+    "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS terms_version text",
+    "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS "
+    "ai_consent boolean NOT NULL DEFAULT false",
+    "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS ai_consent_at timestamptz",
 ]
 
 

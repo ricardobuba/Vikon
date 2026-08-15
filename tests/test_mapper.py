@@ -26,6 +26,12 @@ RAW_ACTIVITY = {
     "kilojoules": 841.0,
     "device_watts": True,
     "trainer": False,
+    # Strava manda SIEMPRE estos tres: son el trazado de la ruta y, con él, el
+    # domicilio del atleta. Están aquí para que el test de abajo pueda probar
+    # que NO acaban en la base de datos.
+    "start_latlng": [41.3874, 2.1686],
+    "end_latlng": [41.3874, 2.1686],
+    "map": {"id": "a123", "summary_polyline": "_p~iF~ps|U_ulLnnqC_mqNvxq`@"},
 }
 
 RAW_STREAMS = {
@@ -47,7 +53,19 @@ def test_map_activity_fields_and_units():
     assert act.weighted_avg_power_w == 235
     assert act.device_watts is True
     assert act.trainer is False
-    assert act.raw["id"] == 123456789                    # se conserva el crudo
+
+
+def test_map_activity_drops_the_raw_payload_and_with_it_the_gps():
+    """El JSON crudo de Strava NO se conserva: trae `start_latlng`, `end_latlng`
+    y la polilínea del recorrido, o sea el domicilio del atleta, y ningún
+    consumidor lo lee. Minimización (RGPD art. 5.1.c) + caché ≤7 días de la API
+    Policy de Strava §6.2. Ver BLINDAJE_LEGAL_Plan.md."""
+    act = map_activity(RAW_ACTIVITY)
+    assert act.raw == {}
+    # Ni rastro de geolocalización en ninguna parte de la actividad canónica.
+    serialized = repr(act)
+    for leak in ("latlng", "polyline", "41.3874", "2.1686"):
+        assert leak not in serialized
 
 
 def test_map_activity_unknown_sport_falls_back_to_other():

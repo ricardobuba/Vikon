@@ -3,11 +3,18 @@ tabla `provider_account`, y alta del atleta local."""
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from datetime import UTC, date, datetime
+from decimal import Decimal
+
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from cycling_coach.adapters.strava.oauth import TokenSet
 from cycling_coach.db.models import Athlete, ProviderAccount
+from cycling_coach.db.repositories import (
+    clear_activity_raw_payloads,
+    delete_streams_for_athlete,
+)
 
 
 def ensure_athlete(session: Session, name: str | None = None) -> Athlete:
@@ -124,6 +131,135 @@ def delete_account(session: Session, athlete_id: int, provider: str) -> bool:
     session.delete(account)
     session.flush()
     return True
+
+
+def purge_raw_strava_data(session: Session, athlete_id: int) -> dict[str, int]:
+    """Purga el material CRUDO de Strava del atleta (streams + JSON crudo de
+    actividad) al desconectar la cuenta — cumple el borrado que exige la API
+    Policy de Strava (reflejarlo en <=48h). Las columnas tipadas de `activity`
+    (potencia media, TSS...) se CONSERVAN a propósito: son el historial de
+    rendimiento del propio atleta y el motor de CTL/ATL/TSB las necesita.
+    Ver BLINDAJE_LEGAL_Plan.md #3."""
+    streams = delete_streams_for_athlete(session, athlete_id)
+    activities = clear_activity_raw_payloads(session, athlete_id)
+    session.flush()
+    return {"streams_deleted": streams, "activities_cleared": activities}
+
+
+def _serializable(value: object) -> object:
+    """Convierte a algo que `json.dumps` acepte, sin perder precisión."""
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def _rows_as_dicts(session: Session, model: type, *filters: object) -> list[dict]:
+    rows = session.execute(select(model).where(*filters)).scalars().all()
+    return [
+        {
+            col.name: _serializable(getattr(row, col.name))
+            for col in model.__table__.columns
+        }
+        for row in rows
+    ]
+
+
+# Columnas que NUNCA salen en la exportación: son credenciales (secretos del
+# sistema o de terceros), no datos personales del interesado. Entregarlas sería
+# un agujero de seguridad disfrazado de derecho de acceso (RGPD art. 15.4:
+# el derecho de acceso no puede afectar negativamente a derechos de terceros).
+_EXPORT_REDACTED = {
+    "pw_hash", "pw_salt", "access_token", "refresh_token",
+}
+
+
+def export_all_data(session: Session, athlete_id: int) -> dict:
+    """Todos los datos personales del atleta, en un dict serializable a JSON.
+
+    Cubre los derechos de acceso (art. 15) y portabilidad (art. 20): formato
+    estructurado, de uso común y lectura mecánica. Se omiten las credenciales
+    (contraseña y tokens de Strava), que no son datos suyos sino secretos."""
+    from cycling_coach.db.models import (
+        Activity,
+        ActivityMmp,
+        Athlete,
+        Availability,
+        AvailabilityOverride,
+        ChatMessage,
+        DailyMetric,
+        Goal,
+        ModelConfig,
+        ParameterEstimate,
+        PlanLog,
+        PlanOverride,
+        ProviderAccount,
+        Stream,
+        TestResult,
+        User,
+    )
+
+    by_athlete: dict[str, type] = {
+        "athlete": Athlete,
+        "provider_account": ProviderAccount,
+        "activity": Activity,
+        "activity_mmp": ActivityMmp,
+        "test_result": TestResult,
+        "model_config": ModelConfig,
+        "parameter_estimate": ParameterEstimate,
+        "goal": Goal,
+        "availability": Availability,
+        "availability_override": AvailabilityOverride,
+        "plan_override": PlanOverride,
+        "plan_log": PlanLog,
+        "chat_message": ChatMessage,
+        "daily_metric": DailyMetric,
+        "app_user": User,
+    }
+
+    data: dict = {}
+    for name, model in by_athlete.items():
+        key = Athlete.id if model is Athlete else model.athlete_id
+        data[name] = _rows_as_dicts(session, model, key == athlete_id)
+
+    # `stream` cuelga de la actividad, no del atleta.
+    data["stream"] = _rows_as_dicts(
+        session,
+        Stream,
+        Stream.activity_id.in_(
+            select(Activity.id).where(Activity.athlete_id == athlete_id)
+        ),
+    )
+
+    for rows in data.values():
+        for row in rows:
+            for field in _EXPORT_REDACTED & row.keys():
+                row[field] = "[omitido: credencial]"
+
+    return {
+        "exportado_el": datetime.now(UTC).isoformat(),
+        "athlete_id": athlete_id,
+        "aviso": (
+            "Exportación completa de tus datos personales en Vikon (RGPD arts. "
+            "15 y 20). Se omiten contraseña y tokens de Strava por seguridad."
+        ),
+        "datos": data,
+    }
+
+
+def delete_athlete_and_user(session: Session, athlete_id: int) -> None:
+    """Borra el atleta y TODO lo que cuelga de él (RGPD art. 17).
+
+    Usa una sentencia DELETE, no `session.delete(obj)`, a propósito: solo
+    `accounts` y `activities` están declaradas con `cascade="all, delete-orphan"`
+    en el ORM; el resto de tablas dependen del `ON DELETE CASCADE` de la base de
+    datos, que la cascada en memoria de SQLAlchemy no dispara. Con `session.delete`
+    creerías haber borrado y quedarían filas huérfanas."""
+    from cycling_coach.db.models import Athlete
+
+    session.execute(delete(Athlete).where(Athlete.id == athlete_id))
+    session.flush()
 
 
 def account_owner(

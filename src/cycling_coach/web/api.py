@@ -24,7 +24,10 @@ from sqlalchemy.orm import Session
 from cycling_coach.accounts import (
     account_owner,
     delete_account,
+    delete_athlete_and_user,
+    export_all_data,
     load_tokens,
+    purge_raw_strava_data,
     save_tokens,
 )
 from cycling_coach.adapters.strava.oauth import build_authorize_url, exchange_code
@@ -114,7 +117,21 @@ async def _sync_loop(interval_s: int) -> None:
                         )
         except Exception:                       # nunca tumbar el bucle
             _log.exception("sync automático: error inesperado")
+        try:
+            # La retención viaja con el sync: si el servidor corre, la política
+            # se aplica sola. Antes el chat solo se podaba al abrirlo y los
+            # streams viejos no los borraba nadie. Ver retention.py.
+            await asyncio.to_thread(_run_retention)
+        except Exception:                       # tampoco por esto
+            _log.exception("retención automática: error inesperado")
         await asyncio.sleep(interval_s)
+
+
+def _run_retention() -> None:
+    from cycling_coach.retention import run_retention
+
+    with session_scope() as session:
+        run_retention(session)
 
 
 def _warm_cache() -> None:
@@ -189,6 +206,16 @@ def _current_athlete_id(request: Request, session: DB) -> int:
     """Atleta del usuario autenticado (por cookie). Si AUTH_ENABLED=false, usa el
     primer atleta (comportamiento previo: pestillo para no bloquearse nunca)."""
     if not get_settings().auth_enabled:
+        # El pestillo existe para rescatar al dueño de un despliegue de UNA
+        # persona. En cuanto hay datos de otra, deja de ser un pestillo y pasa
+        # a ser un agujero: sin cookie, cualquiera de la red se llevaría el
+        # historial de salud del primer atleta. Falla cerrado.
+        if count_users(session) > 1:
+            raise HTTPException(
+                403,
+                "AUTH_ENABLED=false con varias cuentas creadas: no se puede "
+                "saber quién eres. Vuelve a activar la autenticación.",
+            )
         return _first_athlete_id(session)
     uid = parse_token(request.cookies.get(_COOKIE), get_or_create_secret(session))
     user = get_user(session, uid) if uid is not None else None
@@ -203,7 +230,11 @@ AID = Annotated[int, Depends(_current_athlete_id)]
 def _set_session_cookie(response: Response, user_id: int, session: Session) -> None:
     token = make_token(user_id, get_or_create_secret(session))
     response.set_cookie(
-        _COOKIE, token, max_age=TOKEN_TTL_S, httponly=True, samesite="lax"
+        _COOKIE, token, max_age=TOKEN_TTL_S, httponly=True, samesite="lax",
+        # `secure` NO puede ir activado por defecto: hoy la app se sirve por
+        # HTTP en la LAN y el navegador descartaría la cookie, dejándote fuera.
+        # Actívalo (COOKIE_SECURE=true) el mismo día que haya HTTPS.
+        secure=get_settings().cookie_secure,
     )
 
 
@@ -245,6 +276,18 @@ def _facts_json(f: Facts) -> dict[str, Any]:
 
 class AuthIn(BaseModel):
     username: str
+    password: str
+    # Consentimiento del alta. OJO: Pydantic ignora en silencio los campos que
+    # no estén declarados aquí — si el front los manda y faltan, se pierden sin
+    # aviso y te quedas sin la prueba del consentimiento (RGPD art. 7.1).
+    accepted_terms: bool = False
+    terms_version: str | None = None
+    ai_consent: bool = False
+
+
+class DeleteAccountIn(BaseModel):
+    """Borrar la cuenta exige reescribir la contraseña: es irreversible."""
+
     password: str
 
 
@@ -290,7 +333,14 @@ class ProfileIn(BaseModel):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Vikon", docs_url="/api/docs", lifespan=_lifespan)
+    # La documentación interactiva expone el mapa entero de la API sin pedir
+    # nada. En una LAN de casa es cómodo; publicada, es un índice regalado.
+    _docs = "/api/docs" if get_settings().api_docs else None
+    app = FastAPI(
+        title="Vikon", docs_url=_docs, redoc_url=None,
+        openapi_url="/openapi.json" if _docs else None,
+        lifespan=_lifespan,
+    )
     chat_state: dict[str, ChatSession] = {}     # una conversación (single-user local)
 
     @app.middleware("http")
@@ -785,9 +835,15 @@ def create_app() -> FastAPI:
 
     @app.post("/api/strava/disconnect")
     def strava_disconnect(session: DB, aid: AID) -> dict[str, Any]:
-        """Desconecta Strava de ESTE perfil. No borra los entrenamientos ya
-        importados: el historial es del atleta, no de la conexión."""
-        return {"ok": delete_account(session, aid, "strava")}
+        """Desconecta Strava de ESTE perfil. Purga el material CRUDO de Strava
+        (streams + JSON crudo de actividad) — lo exige la API Policy de Strava
+        al desconectar. NO borra los entrenamientos ya importados: el
+        historial de rendimiento (columnas tipadas) es del atleta, no de la
+        conexión, y el motor de CTL/ATL/TSB lo necesita. Ver
+        BLINDAJE_LEGAL_Plan.md #3."""
+        ok = delete_account(session, aid, "strava")
+        purged = purge_raw_strava_data(session, aid)
+        return {"ok": ok, **purged}
 
     @app.get("/api/me")
     def me(request: Request, session: DB) -> dict[str, Any]:
@@ -813,6 +869,12 @@ def create_app() -> FastAPI:
             raise HTTPException(422, f"La contraseña debe tener ≥{MIN_PASSWORD_LEN} caracteres.")
         if get_user_by_username(session, username) is not None:
             raise HTTPException(409, "Ese usuario ya existe.")
+        if not body.accepted_terms:
+            raise HTTPException(
+                422,
+                "Hay que aceptar los términos y la política de privacidad, y "
+                "consentir el tratamiento de datos de salud, para crear la cuenta.",
+            )
         # El PRIMER registro reclama el atleta existente (con todos tus datos);
         # los siguientes crean un atleta nuevo (vacío hasta conectar Strava).
         if count_users(session) == 0:
@@ -820,7 +882,11 @@ def create_app() -> FastAPI:
         else:
             aid = create_athlete(session, name=username)
         pw_hash, pw_salt = hash_password(body.password)
-        user = create_user(session, username, pw_hash, pw_salt, aid)
+        user = create_user(
+            session, username, pw_hash, pw_salt, aid,
+            terms_version=body.terms_version or "sin-versión",
+            ai_consent=body.ai_consent,
+        )
         _set_session_cookie(response, user.id, session)
         return {"ok": True, "username": username}
 
@@ -836,6 +902,54 @@ def create_app() -> FastAPI:
     def logout(response: Response) -> dict[str, Any]:
         response.delete_cookie(_COOKIE)
         return {"ok": True}
+
+    # --- Derechos RGPD (acceso, portabilidad, supresión) --------------------
+    # GUARDIA COMÚN: con AUTH_ENABLED=false, `_current_athlete_id` devuelve el
+    # PRIMER atleta a quien alcance el puerto. Un GET de exportación sin auth
+    # entregaría el historial de salud completo a cualquiera de la red, y un
+    # DELETE lo borraría. El pestillo existe para rescatarte a ti, no para
+    # abrir estas dos puertas.
+    def _require_real_auth() -> None:
+        if not get_settings().auth_enabled:
+            raise HTTPException(
+                403,
+                "Con AUTH_ENABLED=false no se puede exportar ni borrar la cuenta: "
+                "no hay forma de comprobar quién lo pide. Activa la autenticación.",
+            )
+
+    @app.get("/api/account/export")
+    def export_account(session: DB, aid: AID) -> Response:
+        """Todos tus datos en un JSON descargable (RGPD arts. 15 y 20)."""
+        _require_real_auth()
+        payload = export_all_data(session, aid)
+        return Response(
+            content=json.dumps(payload, ensure_ascii=False, indent=2),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": 'attachment; filename="vikon-mis-datos.json"'
+            },
+        )
+
+    @app.delete("/api/account")
+    def delete_account_ep(
+        body: DeleteAccountIn, request: Request, response: Response,
+        session: DB, aid: AID,
+    ) -> dict[str, Any]:
+        """Borra la cuenta y TODOS los datos (RGPD art. 17). Irreversible.
+
+        Pide la contraseña otra vez: es una acción destructiva y definitiva, y
+        una cookie robada no debería bastar para vaciarle la vida deportiva a
+        nadie."""
+        _require_real_auth()
+        uid = parse_token(request.cookies.get(_COOKIE), get_or_create_secret(session))
+        user = get_user(session, uid) if uid is not None else None
+        if user is None:
+            raise HTTPException(401, "No autenticado")
+        if not verify_password(body.password, user.pw_hash, user.pw_salt):
+            raise HTTPException(403, "Contraseña incorrecta.")
+        delete_athlete_and_user(session, aid)
+        response.delete_cookie(_COOKIE)
+        return {"ok": True, "deleted_athlete_id": aid}
 
     if _STATIC.is_dir():
         app.mount("/static", StaticFiles(directory=_STATIC), name="static")

@@ -172,6 +172,12 @@ class ActivityMmp(Base):
     Se guardan las dos variantes porque el código las usa distinto y mezclarlas
     cambiaría resultados en silencio: el filtro de CP trabaja sobre la señal
     LIMPIA, y la coherencia sobre la CRUDA.
+
+    También es la POLÍTICA de retención de cara a Strava (no solo una mejora
+    de rendimiento): al ser MMP derivada, no "Strava Data" cruda, sustituye
+    al stream para todo lo que el motor necesita — así soltar/purgar streams
+    (ver `purge_raw_strava_data` en accounts.py) no pierde la trayectoria de
+    CP del atleta. Ver BLINDAJE_LEGAL_Plan.md #3.
     """
 
     __tablename__ = "activity_mmp"
@@ -300,6 +306,21 @@ class User(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Prueba del consentimiento (RGPD art. 7.1: hay que PODER demostrarlo).
+    # La versión importa tanto como la fecha: sin ella no se sabe a qué texto
+    # dijo que sí. `ai_consent` va aparte porque es una finalidad distinta y
+    # revocable (art. 7.3) — Vikon funciona entero sin ella.
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    terms_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_consent: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
+    ai_consent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

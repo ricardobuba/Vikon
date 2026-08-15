@@ -54,7 +54,7 @@ header {
 }
 header img { width: 40px; height: 40px; border-radius: 11px; }
 header .brand { font-family: 'Sora'; font-weight: 700; font-size: 22px; letter-spacing: .5px; }
-header .brand span { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+header .brand span { background: var(--electric); -webkit-background-clip: text; background-clip: text; color: transparent; }
 header .date { margin-left: auto; color: var(--muted); font-size: 13px; }
 
 main { flex: 1; padding: 8px 16px 96px; }
@@ -118,6 +118,14 @@ main { flex: 1; padding: 8px 16px 96px; }
 
 /* --- Chat --- */
 #chat-view { display: none; }
+/* Aviso de IA (art. 50 del Reglamento de IA). Discreto pero legible: la norma
+   pide que sea claro y distinguible, no que grite. */
+.ai-notice {
+  margin-bottom: 12px; padding: 9px 12px; border-radius: 10px;
+  background: var(--card-2); color: var(--muted);
+  font-size: 12px; line-height: 1.45;
+}
+.ai-notice strong { color: var(--text); }
 .chat-log { display: flex; flex-direction: column; gap: 10px; padding-bottom: 8px; }
 .msg { max-width: 85%; padding: 11px 14px; border-radius: 16px; font-size: 14px; line-height: 1.45; }
 .msg.user { align-self: flex-end; background: var(--grad); color: #fff; font-weight: 500; border-bottom-right-radius: 5px; }
@@ -291,6 +299,22 @@ code { background: var(--card-2); border-radius: 5px; padding: 1px 6px; font-siz
   border-radius: 12px; padding: 14px; font-size: 15px; cursor: pointer; font-family: inherit;
 }
 .ob-actions button:disabled { opacity: .6; }
+/* Casillas de consentimiento del registro (RGPD art. 9.2.a: acción afirmativa,
+   nunca premarcadas). Objetivo táctil de 20px y separación holgada: aquí se
+   toma una decisión, no se rellena un formulario. */
+.consent {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin-top: 16px; cursor: pointer;
+  font-size: 13px; line-height: 1.45; color: var(--muted);
+}
+.consent input[type="checkbox"] {
+  flex: 0 0 auto; width: 20px; height: 20px; margin: 1px 0 0;
+  accent-color: var(--electric); cursor: pointer;
+}
+.consent a { color: var(--electric); }
+.consent strong { color: var(--text); }
+.consent em { font-style: normal; opacity: .85; }
+
 .ob-skip { text-align: center; margin-top: 12px; }
 .ob-skip a { color: var(--muted); font-size: 13px; cursor: pointer; text-decoration: underline; }
 #ob-msg, #au-msg { margin-top: 10px; font-size: 13px; color: var(--coral); text-align: center; }
