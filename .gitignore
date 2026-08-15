@@ -8,14 +8,27 @@ build/
 dist/
 
 # Entornos / secretos
-.env
+# `.env*` y no `.env` a secas: el día que haya un VPS aparecerá un .env.production
+# con credenciales reales, y la regla anterior no lo habría cubierto.
+.env*
+!.env.example
 *.local
+secrets.*
+*.pem
+*.key
+
+# Documentos de trabajo que NO se publican: llevan planificación fiscal, análisis
+# de exposición jurídica, debilidades sin corregir y datos de terceros.
+BLINDAJE_LEGAL_Plan.md
+SALIDA_A_MERCADO_Plan.md
 
 # Datos locales (nunca versionar streams ni exports de Strava)
 data/
 *.fit
 *.gpx
 *.tcx
+# Exportación RGPD de la propia cuenta: lleva el historial de salud entero
+vikon-mis-datos*.json
 
 # Herramientas
 .pytest_cache/
@@ -23,6 +36,10 @@ data/
 .mypy_cache/
 .coverage
 htmlcov/
+*.log
+*.sql
+*.sql.gz
+*.dump
 
 # SO / editor
 .DS_Store

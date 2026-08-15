@@ -6,6 +6,32 @@
 
 ---
 
+> ## ⚠️ Documento histórico — leer con [`FINALIDAD_PREVISTA.md`](FINALIDAD_PREVISTA.md) delante
+>
+> Esto es el **estudio de diseño de julio de 2026**, conservado como registro de
+> lo que se pensó al principio. Varias de sus ideas se implementaron, se
+> midieron y **se descartaron por no funcionar** — y eso es justamente lo que
+> merece la pena conservar. En concreto:
+>
+> - El **DFA-α1** (§4.2, §11.2) se eliminó del proyecto: Strava no da intervalos
+>   RR y nunca los dará. El código se borró.
+> - El **riesgo de lesión** (§4.4, §15.1) **no se ha implementado y no se va a
+>   implementar** tal como aquí se describe. Ver abajo.
+> - El **modelo de 3 parámetros** se implementó, distorsionaba la estimación del
+>   umbral y se revirtió.
+> - La **durabilidad** se modeló, pero los datos disponibles no la miden.
+>
+> **Y una precisión que manda sobre el resto del documento:** Vikon es una
+> herramienta de entrenamiento deportivo, **no un producto sanitario**. No
+> diagnostica, no previene, no monitoriza ni trata ninguna enfermedad. Donde
+> este texto hable de *riesgo de lesión*, *estado autonómico* o *captar
+> sobreentrenamiento*, léase como lo que el producto real hace: **estimar carga
+> y disponibilidad para entrenar**. La declaración vinculante de qué es Vikon y
+> qué no es está en [`FINALIDAD_PREVISTA.md`](FINALIDAD_PREVISTA.md), y prevalece
+> sobre cualquier frase de este documento.
+
+---
+
 ## 0. Resumen ejecutivo
 
 El objetivo no es otro planificador de entrenamientos, sino el **entrenador de ciclismo con IA más avanzado posible**: se comporta como un coach humano de élite que conoce la literatura científica, aprende continuamente del usuario, explica todas sus decisiones, adapta el entrenamiento a diario y planifica a largo plazo, sin generar nunca entrenamientos aleatorios.
@@ -165,7 +191,7 @@ class AthleteState:
 
 ### 4.1 Misión
 
-**No genera entrenamientos.** Responde a una sola pregunta: *¿cómo está este ciclista ahora mismo, y cómo estará si hace X?* Entradas: potencia, FC, HRV, sueño, RPE, entrenamientos, competiciones, disponibilidad. Salidas: fitness, fatiga, recuperación, forma, FTP/VO₂ estimados, riesgo de lesión.
+**No genera entrenamientos.** Responde a una sola pregunta: *¿cómo está este ciclista ahora mismo, y cómo estará si hace X?* Entradas: potencia, FC, HRV, sueño, RPE, entrenamientos, competiciones, disponibilidad. Salidas: fitness, fatiga, recuperación, forma, FTP/VO₂ estimados, y **tolerancia a la carga** (cuánto estímulo admite sin pasarse).
 
 ### 4.2 Arquitectura grey-box
 
@@ -176,7 +202,7 @@ class AthleteState:
   `Fitness(t)=Σ w(i)·e^{−(t−i)/τ1}`, `Fatigue(t)=Σ w(i)·e^{−(t−i)/τ2}`.
   Extensión Busso: ganancia de fatiga `k2` variable con la carga reciente.
 - **Critical Power + W′ balance (Skiba)**: `P(t)=CP + W′/t`; depleción/recarga de W′ intra-sesión con `τ_W′` dependiente de la intensidad.
-- **DFA-α1** (de series RR) como marcador no invasivo de umbrales y de estado autonómico/fatiga.
+- **DFA-α1** (de series RR) como marcador no invasivo de umbrales y de fatiga acumulada.
 
 **Capa gris (aprendida)** — un residuo que corrige lo que el esqueleto no explica, **por usuario**:
 `y = f_mecanístico(x; θ) + g_ML(x; φ)`, donde `g` es pequeño y regularizado (GP o red ligera) y `θ` se estima por **Bayes jerárquico** (cap. 9). La capa gris nunca puede inventar fisiología imposible: se acota con restricciones físicas (monotonicidad, signos, rangos).
@@ -185,14 +211,23 @@ class AthleteState:
 
 Filtro secuencial (Kalman/partícula o actualización bayesiana por lotes) que fusiona las señales ruidosas (potencia, HRV, sueño) en el `AthleteState`, propagando incertidumbre. Cada salida es un `Estimate`, no un escalar.
 
-### 4.4 Riesgo de lesión
+### 4.4 Tolerancia a la carga
 
-Modelo de riesgo basado en carga aguda/crónica (ACWR), monotonía/strain (Foster), rampas de volumen e histórico de lesiones. Salida = probabilidad calibrada + factores contribuyentes (para la explicación).
+> *Esta sección se titulaba "Riesgo de lesión" y describía una probabilidad
+> calibrada de lesionarse. **No se implementó, y no se implementará así.**
+> Estimar riesgo de daño a la salud es finalidad médica: convertiría a Vikon en
+> producto sanitario (MDCG 2019-11 rev.1). Lo que sí se ha construido es lo de
+> abajo, que usa las mismas señales para una decisión de entrenamiento.*
+
+Restricciones de seguridad sobre la dosis, a partir de carga aguda/crónica
+(ACWR), monotonía/strain (Foster) y rampas de volumen. **Salida = un tope de
+estímulo para hoy**, con los factores que lo explican. Nunca una probabilidad de
+lesión ni un aviso de salud: la decisión que produce es *cuánto entrenar*.
 
 ### 4.5 Decisiones de fase
 
 - **Fase 2**: esqueleto mecanístico + estimación de estado con incertidumbre (sin capa gris).
-- **Fase 3**: añadir capa gris `g_ML` y riesgo de lesión.
+- **Fase 3**: añadir capa gris `g_ML` y las restricciones de tolerancia a la carga.
 - **Futuro**: sustituir componentes por modelos superiores validados (ver cap. 18).
 
 ---
@@ -247,7 +282,7 @@ Actualizar estado ─▶ Actualizar gemelo ─▶ Determinar objetivo fisiológi
 
 ### 6.4 Búsqueda con horizonte deslizante (analogía GPS)
 
-En vez de optimizar solo mañana, genera **N trayectorias candidatas** de semanas (A, B, C…), **simula** para cada una con el motor fisiológico (FTP esperado, fatiga, prob. lesión, carga, cumplimiento esperado) y **elige la mejor** según la función de puntuación. Recalcula a diario (**receding horizon control** heurístico).
+En vez de optimizar solo mañana, genera **N trayectorias candidatas** de semanas (A, B, C…), **simula** para cada una con el motor fisiológico (FTP esperado, fatiga, tolerancia a la carga, carga, cumplimiento esperado) y **elige la mejor** según la función de puntuación. Recalcula a diario (**receding horizon control** heurístico).
 
 - Generación de candidatos: plantillas de periodización + perturbaciones guiadas por objetivo (no aleatorias) + restricciones duras (disponibilidad, eventos).
 - Poda: se descartan candidatos que violan restricciones o superan umbrales de riesgo antes de simular.
@@ -257,7 +292,7 @@ En vez de optimizar solo mañana, genera **N trayectorias candidatas** de semana
 ```
 Score = Σ_k  β_k · término_k
 ```
-Términos: alineación con objetivo, disponibilidad, fatiga, recuperación, proximidad de competiciones, historial/preferencias del usuario, evidencia científica, riesgo de lesión (penalización fuerte), monotonía (penalización), adaptación esperada. Los `β_k` son ajustables y en parte aprendidos. Se elige el mayor `Score`; ante empates, el de **menor incertidumbre**.
+Términos: alineación con objetivo, disponibilidad, fatiga, recuperación, proximidad de competiciones, historial/preferencias del usuario, evidencia científica, tolerancia a la carga excedida (penalización fuerte), monotonía (penalización), adaptación esperada. Los `β_k` son ajustables y en parte aprendidos. Se elige el mayor `Score`; ante empates, el de **menor incertidumbre**.
 
 ### 6.6 Diseño preparado para RL (fase futura)
 
@@ -324,7 +359,7 @@ Los metadatos derivables (tiempo por zona, cargas) se **calculan** de los bloque
 Referencia de los modelos concretos usados por el cap. 4:
 
 - **Impulso-respuesta (Banister)**: dos exponenciales (τ₁≈42 d fitness, τ₂≈7 d fatiga como priors), ganancias `k1,k2` por usuario.
-- **Busso (fatiga variable)**: `k2` función de la carga acumulada reciente → captura sobreentrenamiento.
+- **Busso (fatiga variable)**: `k2` función de la carga acumulada reciente → capta la acumulación de fatiga que el modelo simple no ve.
 - **Critical Power**: modelos de 2 parámetros (CP, W′) y 3 parámetros; ajuste robusto sobre la curva de potencia-duración.
 - **W′ balance (Skiba)**: recarga con `τ_W′ = f(D_CP)` (déficit respecto a CP).
 - **DFA-α1**: cálculo desde intervalos RR con ventanas deslizantes; mapeo a umbrales aeróbico/anaeróbico.
@@ -484,7 +519,7 @@ Hoy: **monolito modular** (cap. 2). Cuando la escala lo justifique, los módulos
 - **Capa gris** del motor fisiológico (residuos acotados): GP o red ligera regularizada.
 - **Inferencia bayesiana** de parámetros (PyMC/Stan): el "ML" central del proyecto al principio.
 - **Personalización del CRI** y de los pesos `β` del scoring.
-- **Riesgo de lesión**: clasificador calibrado.
+- **Tolerancia a la carga**: tope de estímulo diario a partir de ACWR, monotonía y rampa (no es una predicción de lesión; ver §4.4).
 - **Futuro**: política RL para el planificador.
 
 ### 15.2 Principios

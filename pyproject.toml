@@ -1,9 +1,13 @@
 [project]
 name = "cycling-coach"
 version = "0.1.0"
-description = "AI Cycling Coach — motor de entrenamiento con IA (grey-box). Fase 1: ingesta de datos."
+description = "Vikon — entrenador de ciclismo: motor fisiológico grey-box, planificador determinista y capa conversacional."
 requires-python = ">=3.11"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Ricardo Martin Buba Sopko" }]
+keywords = ["cycling", "training", "critical-power", "sports-science"]
 
 dependencies = [
     "sqlalchemy>=2.0",

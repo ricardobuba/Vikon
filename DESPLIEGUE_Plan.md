@@ -257,13 +257,19 @@ Los pasos 1.1 y 1.2 son los que responden a lo que pediste: ingerir solo el
 
 Deja de ser opcional en cuanto haya una URL pública:
 
-1. Cookie de sesión con `Secure` cuando el origen sea HTTPS.
-2. **Límite de intentos en `/api/login`** — hoy no hay ninguno.
-3. **Registro por invitación** — sin esto, una URL pública es una URL donde
+1. ✅ Cookie de sesión con `Secure` — conmutable con `COOKIE_SECURE`. Queda en
+   `false` mientras se sirva por HTTP en la LAN (si no, el navegador la
+   descarta); se activa el día que haya HTTPS.
+2. ✅ El pestillo `AUTH_ENABLED=false` ya **falla cerrado**: con más de una
+   cuenta creada devuelve 403 en vez de servir el primer atleta. Sigue siendo
+   un rescate válido para un despliegue de una sola persona.
+3. ✅ La documentación de la API (`/api/docs`, `/openapi.json`) se apaga con
+   `API_DOCS=false`.
+4. Límite de intentos en `/api/login`.
+5. Registro por invitación: sin esto, una URL pública es una URL donde
    cualquiera se crea una cuenta en tu servidor.
-4. **Matar el pestillo `AUTH_ENABLED=false`** en producción: salta el login
-   entero y haría que todos cayeran en el primer atleta.
-5. Correo como identidad + recuperación de contraseña.
+6. Cifrar en reposo los tokens de Strava.
+7. Correo como identidad + recuperación de contraseña.
 
 ### Fase 3 — Infraestructura *(tuyo lo que toca credenciales, mío el resto)*
 

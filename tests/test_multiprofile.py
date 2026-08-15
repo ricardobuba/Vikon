@@ -59,8 +59,11 @@ def test_state_still_valid_just_before_expiry():
 
 def test_authorize_url_carries_the_callback_of_this_host():
     """El callback vuelve al MISMO host por el que entró el usuario: localhost
-    desde el PC, la IP de la LAN desde el móvil."""
-    url = build_authorize_url("123", "http://192.168.1.130:8730/api/strava/callback")
+    desde el PC, la IP de la LAN desde el móvil.
+
+    La IP es la de documentación de la RFC 5737 (TEST-NET-1), no una real: un
+    test no debe publicar la topología de la red de nadie."""
+    url = build_authorize_url("123", "http://192.0.2.10:8730/api/strava/callback")
     assert "client_id=123" in url
-    assert "192.168.1.130" in url and "%2Fapi%2Fstrava%2Fcallback" in url
+    assert "192.0.2.10" in url and "%2Fapi%2Fstrava%2Fcallback" in url
     assert "activity%3Aread_all" in url        # hace falta para leer privadas
