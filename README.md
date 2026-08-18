@@ -12,8 +12,11 @@ de la variación del rendimiento, el README lo dice en vez de venderlo.
 > de entrenamiento deportivo, con fines informativos y de rendimiento. No
 > diagnostica, no previene, no monitoriza ni trata ninguna enfermedad, y no
 > sustituye el consejo de un profesional sanitario. El ejercicio intenso conlleva
-> riesgo; consulta a tu médico antes de empezar. Ver
-> [`FINALIDAD_PREVISTA.md`](FINALIDAD_PREVISTA.md).
+> riesgo; consulta a tu médico antes de empezar. Pensado para personas adultas y
+> sanas: **no** para menores, embarazo, cardiopatías/arritmias diagnosticadas ni
+> rehabilitación clínica tras lesión o cirugía. El límite se hace cumplir en el
+> prompt del asistente ([`prompts.py`](src/cycling_coach/assistant/prompts.py))
+> y lo verifica [`test_medical_boundary.py`](tests/test_medical_boundary.py).
 
 ---
 
@@ -118,13 +121,6 @@ uv run mypy src
 | `assistant/` | Ficha de hechos, prompts y cliente LLM |
 | `web/` | API FastAPI + frontend mobile-first |
 | `retention.py` | Política de retención de datos |
-
-## Documentación
-
-- [`AI_Cycling_Coach_System_Design.md`](AI_Cycling_Coach_System_Design.md) — diseño completo
-- [`FINALIDAD_PREVISTA.md`](FINALIDAD_PREVISTA.md) — qué es Vikon y qué no, y por qué no lleva marcado CE
-- [`RAG_Plan_Implementacion.md`](RAG_Plan_Implementacion.md) — RAG científico (propuesta)
-- [`DESPLIEGUE_Plan.md`](DESPLIEGUE_Plan.md) — de la LAN a un servicio
 
 ## Aviso sobre la API de Strava
 

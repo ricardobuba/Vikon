@@ -774,7 +774,7 @@ def delete_streams_for_athlete(session: Session, athlete_id: int) -> int:
 
 def delete_streams_older_than(session: Session, athlete_id: int, before: date) -> int:
     """Borra los streams de actividades anteriores a `before` (ventana de
-    retencion de streams, p. ej. 12 meses — ver DESPLIEGUE_Plan.md)."""
+    retención de streams, p. ej. 12 meses)."""
     result = session.execute(
         delete(Stream).where(
             Stream.activity_id.in_(

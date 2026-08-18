@@ -22,6 +22,9 @@ secrets.*
 BLINDAJE_LEGAL_Plan.md
 SALIDA_A_MERCADO_Plan.md
 
+# Tooling de desarrollo local (launch config de Claude Code), no es parte del proyecto
+.claude/
+
 # Datos locales (nunca versionar streams ni exports de Strava)
 data/
 *.fit

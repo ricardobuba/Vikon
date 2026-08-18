@@ -1,4 +1,4 @@
-"""El bozal sanitario del LLM está puesto (FINALIDAD_PREVISTA.md).
+"""El bozal sanitario del LLM está puesto.
 
 No se puede testear lo que un LLM responderá — es probabilístico y vive al otro
 lado de la red. Lo que SÍ se puede testear, y es lo que importa, es que la
