@@ -1,41 +1,23 @@
-/* Estilo compartido de las páginas legales. Autónomo a propósito: estos textos
-   tienen que poder abrirse solos, sin la app y sin depender de nada externo. */
-:root {
-  --bg: #E9F0FA;
-  --card: #FFFFFF;
-  --text: #16202E;
-  --muted: #5F6C82;
-  --border: #D6E0EE;
-  --electric: #1F6BEC;
-  --shadow: 0 2px 12px rgba(22, 32, 46, .07);
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #121821;
-    --card: #1A2230;
-    --text: #EEF3FA;
-    --muted: #9AA8BC;
-    --border: #2A3547;
-    --electric: #4E8DF5;
-    --shadow: 0 2px 12px rgba(0, 0, 0, .35);
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #121821;
-  --card: #1A2230;
-  --text: #EEF3FA;
-  --muted: #9AA8BC;
-  --border: #2A3547;
-  --electric: #4E8DF5;
-  --shadow: 0 2px 12px rgba(0, 0, 0, .35);
-}
+/* Estilo de las páginas legales. Hereda los tokens del sistema v2 para que
+   privacidad y términos no parezcan de otra app: mismos colores, mismas
+   tipografías, mismo modo claro/oscuro. Autónomo en lo demás — estos textos
+   tienen que poder abrirse solos, sin la app. */
+@import url("/static/tokens.css");
 
 * { box-sizing: border-box; }
+
+/* Puente de nombres: legal.css se escribió contra la paleta anterior. */
+:root {
+  --card: var(--surface); --text: var(--ink); --muted: var(--dim);
+  --border: var(--line); --electric: var(--accent);
+  --shadow: none;
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-body);
   font-size: 15px;
   line-height: 1.6;
 }
@@ -48,14 +30,14 @@ header.legal {
 }
 header.legal img { width: 38px; height: 38px; border-radius: 10px; }
 header.legal .brand {
-  font-family: 'Sora', 'Inter', sans-serif; font-weight: 700;
+  font-family: var(--font-display); font-weight: 700;
   font-size: 20px; letter-spacing: .5px; color: var(--electric);
 }
 header.legal .back { margin-left: auto; font-size: 13px; }
 
-h1 { font-family: 'Sora', 'Inter', sans-serif; font-size: 26px; margin: 0 0 6px; }
+h1 { font-family: var(--font-display); font-size: 26px; margin: 0 0 6px; }
 h2 {
-  font-family: 'Sora', 'Inter', sans-serif; font-size: 18px;
+  font-family: var(--font-display); font-size: 18px;
   margin: 34px 0 10px; padding-top: 14px; border-top: 1px solid var(--border);
 }
 h3 { font-size: 15px; margin: 20px 0 6px; }

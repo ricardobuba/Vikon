@@ -250,26 +250,24 @@ function zoneFor(target) {
 function blockHtml(t) {
   const m = t.match(/(\d[\d–\-]*\s*W)/);
   const w = m ? m[1] : "", label = w ? t.replace(w, "").trim() : t;
-  return `<div class="block ${zoneFor(t)}"><span>${label}</span><span class="w">${w}</span></div>`;
+  return `<div class="vk-block"><i class="vk-rail ${zoneFor(t)}"></i><span>${label}</span><b>${w}</b></div>`;
 }
 
-// Medidor de forma: barra de color con marcador en tu TSB (zonas personalizadas).
-function formGauge(s) {
+// Tile de forma: el TSB sobre el medidor, con los cortes REALES del atleta en
+// el eje. Los extremos no son -33/+23 fijos: salen de sus percentiles.
+function formTile(s) {
   if (s.tsb == null) return "";
   const th = s.thresholds || {};
   const lo = (th.recovery != null ? th.recovery : -25) - 8;
   const hi = (th.fresh != null ? th.fresh : 15) + 8;
   const pos = Math.max(2, Math.min(98, (s.tsb - lo) / (hi - lo) * 100));
-  const label = s.form_label || "";
-  const color = {
-    "Muy fatigado": "var(--red)", "Fatigado": "var(--coral)", "Neutro": "var(--amber)",
-    "Fresco": "var(--teal)", "Muy fresco": "var(--electric)",
-  }[label] || "var(--text)";
-  return `<div class="card">
-    <div class="form-head"><h3>Tu forma</h3><span class="form-status" style="color:${color}">${label} · ${signed(s.tsb)}</span></div>
-    <div class="gauge"><div class="gauge-marker" style="left:${pos}%"></div></div>
-    <div class="gauge-labels"><span>Fatigado</span><span>Neutro</span><span>Fresco</span></div>
-  </div>`;
+  return `<div class="vk-tiles"><div class="vk-tile t-form vk-tile--wide">
+    <div class="vk-section" style="margin:0"><span class="vk-key">Forma</span>
+      <small>${s.form_label || ""}</small></div>
+    <b>${signed(s.tsb)}</b>
+    <div class="vk-gauge"><b style="left:${pos}%"></b></div>
+    <div class="vk-axis"><span>${Math.round(lo)}</span><span>0</span><span>+${Math.round(hi)}</span></div>
+  </div></div>`;
 }
 
 // "Por qué" del plan: el motor devuelve una frase con anotaciones entre
@@ -283,71 +281,104 @@ function whyCard(rationale) {
   const chips = notes.map((n) => {
     const [head, ...rest] = n.split(":");
     const body = rest.join(":").trim();
-    return `<div class="why-note"><b>${head.trim()}</b>${body ? `<span>${body}</span>` : ""}</div>`;
+    return `<div class="vk-note"><b>${head.trim()}</b><span>${body || ""}</span></div>`;
   }).join("");
-  return `<div class="card why"><h3>Por qué este entrenamiento</h3>
-    <p>${main}</p>${chips ? `<div class="why-notes">${chips}</div>` : ""}</div>`;
+  return `<div class="vk-panel"><div class="vk-key">Por qué</div>
+    <p class="vk-prose">${main}</p>${chips}</div>`;
 }
 
 // Esqueletos: mientras llegan los datos se ve la FORMA de la pantalla.
 const SKELETON = {
-  home: `<div class="sk sk-hero"></div>
-    <div class="sk-stats">${'<div class="sk sk-stat"></div>'.repeat(4)}</div>
-    <div class="sk sk-card"></div>`,
-  rows: `${'<div class="sk sk-row"></div>'.repeat(6)}`,
-  cards: `<div class="sk sk-card"></div><div class="sk sk-card"></div>`,
+  home: `<div class="vk-sk" style="height:210px"></div>
+    <div class="vk-sk" style="height:104px;margin-top:12px"></div>
+    <div class="vk-sk" style="height:86px;margin-top:12px"></div>`,
+  rows: `${'<div class="vk-sk" style="height:52px;margin-bottom:10px"></div>'.repeat(6)}`,
+  cards: `<div class="vk-sk" style="height:150px;margin-bottom:12px"></div>
+    <div class="vk-sk" style="height:150px"></div>`,
 };
 
 // --- Pantalla HOY -----------------------------------------------------------
 function renderHome(s) {
   const p = s.plan;
-  const tsbClass = s.tsb == null ? "" : s.tsb >= 0 ? "pos" : "neg";
-  let goal = "";
-  if (s.goal_date) goal = `<div class="goal">
-    <span class="goal-ic">${icon("target", 20)}</span>
-    <div class="goal-txt"><b>${s.goal_name || "Evento"}</b><span>faltan ${s.days_to_event} días · fase ${s.phase}</span></div>
-    <span class="goal-days">${s.days_to_event}<i>días</i></span>
-  </div>`;
-  const trained = s.trained_today
-    ? `<div class="pill-ok"><span class="pill-ic">${icon("check", 18)}</span>Ya entrenaste hoy · ${hhmm(s.trained_minutes)} h</div>` : "";
-  const planLabel = s.trained_today ? "Mañana" : "Plan de hoy";
-  let planHtml = `<div class="loading">No hay plan. Falta el FTP.</div>`;
+  const planLabel = s.trained_today ? "Mañana" : "Sesión de hoy";
+  let planHtml = `<div class="vk-empty">No hay plan todavía: falta estimar tu FTP.</div>`;
   if (p) {
-    const adjust = p.aspired ? `<div class="badge-adjust">rebajado desde ${p.aspired}</div>` : "";
-    const blocks = (p.targets || []).map(blockHtml).join("");
-    planHtml = `${trained}
-      <div class="hero"><div class="hero-inner">
-        <div class="label">${planLabel}</div>
-        <div class="session">${p.session}</div>
-        <div class="objective">${p.objective.replace("_", " ")} · <span class="duration">${hhmm(p.minutes)} h</span></div>
-        ${adjust}<div class="blocks">${blocks}</div>
-      </div></div>`;
+    const chips = [];
+    if (s.trained_today) {
+      chips.push(`<span class="vk-chip vk-chip--ok">ya entrenaste hoy · ${hhmm(s.trained_minutes)} h</span>`);
+    }
+    if (p.aspired) {
+      chips.push(`<span class="vk-chip vk-chip--adjust">rebajado desde ${p.aspired}</span>`);
+    }
+    const meta = [
+      `${hhmm(p.minutes)} h`,
+      p.tss != null ? `${p.tss} TSS` : null,
+      p.intensity != null ? `IF ${p.intensity.toFixed(2)}` : null,
+    ].filter(Boolean).join(" · ");
+    planHtml = `<div class="vk-panel vk-panel--ink">
+      <div class="vk-key">${planLabel}</div>
+      <h1 class="vk-hero-title">${p.session}</h1>
+      <div class="vk-hero-meta">${meta}</div>
+      ${chips.length ? `<div class="vk-chips" style="margin-top:14px">${chips.join("")}</div>` : ""}
+      <div class="vk-blocks">${(p.targets || []).map(blockHtml).join("")}</div>
+    </div>`;
   }
+
+  // Retícula: solo cifras con unidad y ventana temporal (regla 5 del sistema).
+  const stats = [
+    s.days_to_event != null ? [s.days_to_event, "días meta"] : null,
+    [fmt(s.atl), "atl 7d"],
+    p && p.intensity != null ? [p.intensity.toFixed(2), "if hoy"] : null,
+    [fmt(s.ctl), "ctl 42d"],
+  ].filter(Boolean);
+
+  const engine = [
+    s.ftp != null ? `<div class="vk-row"><span class="vk-key">FTP</span><b>${fmt(s.ftp)} W</b></div>` : "",
+    s.cp != null ? `<div class="vk-row"><span class="vk-key">CP</span><b>${fmt(s.cp)} W</b></div>` : "",
+    s.w_prime != null ? `<div class="vk-row"><span class="vk-key">W′</span><b>${(s.w_prime / 1000).toFixed(1)} kJ</b></div>` : "",
+    s.cri_coverage != null
+      ? `<div class="vk-row"><span class="vk-key">CRI</span><b>${fmt(s.cri)}</b><span class="vk-trail">cobertura ${Math.round(s.cri_coverage * 100)} %</span></div>` : "",
+  ].join("");
+
+  const goal = s.goal_date ? `<div class="vk-panel">
+    <div class="vk-section" style="margin:0"><span class="vk-key">Objetivo</span>
+      <span class="vk-key">fase ${s.phase}</span></div>
+    <div class="vk-row" style="border:none"><span>${s.goal_name || "Evento"}</span>
+      <b style="margin-left:auto">${shortDate(s.goal_date)} · ${s.days_to_event} d</b></div>
+  </div>` : "";
+
   $("#home-content").innerHTML = `${planHtml}
-    <div class="stats">
-      <div class="stat ${tsbClass}"><span class="num">${signed(s.tsb)}</span><span class="k">FORMA</span></div>
-      <div class="stat"><span class="num">${fmt(s.ctl)}</span><span class="k">FITNESS</span></div>
-      <div class="stat"><span class="num">${fmt(s.cri)}</span><span class="k">CRI</span></div>
-      <div class="stat"><span class="num">${fmt(s.ftp)}</span><span class="k">FTP W</span></div>
+    ${formTile(s)}
+    <div class="vk-tiles vk-tiles--3">
+      <div class="vk-tile t-fitness vk-tile--compact"><span class="vk-key">Fitness</span><b>${fmt(s.ctl)}</b><small>CTL 42 d</small></div>
+      <div class="vk-tile t-cri vk-tile--compact"><span class="vk-key">CRI</span><b>${fmt(s.cri)}</b><small>disposición</small></div>
+      <div class="vk-tile t-engine vk-tile--compact"><span class="vk-key">FTP</span><b>${fmt(s.ftp)}</b><small>watts</small></div>
     </div>
-    ${formGauge(s)}
+    <div class="vk-stats">${stats.map(([v, k]) =>
+      `<div class="vk-stat"><b>${v}</b><span>${k}</span></div>`).join("")}</div>
     ${goal}
-    <div class="card"><h3>Forma y predicción</h3><div class="sub">Fitness (CTL) y frescura (TSB) · 60 días + próximos 7 (punteado). Toca la gráfica.</div><div id="form-svg" class="loading" style="padding:20px">…</div></div>
+    <div class="vk-panel">
+      <div class="vk-section" style="margin:0"><span class="vk-key">Forma y predicción</span>
+        <span class="vk-key">60 d + 7</span></div>
+      <div id="form-svg" style="margin-top:10px"><div class="vk-sk" style="height:150px"></div></div>
+    </div>
+    ${engine ? `<div class="vk-panel"><div class="vk-key">Motor</div>
+      <div class="vk-rows" style="margin-top:8px">${engine}</div></div>` : ""}
     ${p ? whyCard(p.rationale) : ""}`;
   // gráfica de forma + predicción (interactiva)
   api("/api/form-forecast?past=60&future=7").then((t) => {
-    if (!t.length) { $("#form-svg").innerHTML = `<div class="sub">sin datos</div>`; return; }
+    if (!t.length) { $("#form-svg").innerHTML = `<div class="vk-empty">Sin datos todavía.</div>`; return; }
     let split = t.findIndex((d) => d.projected);
     split = split < 0 ? t.length - 1 : split - 1;
     mountChart($("#form-svg"), {
       dates: labelDates(t.map((d) => d.day)),
       series: [
-        { vals: t.map((d) => d.ctl), color: "#12A9E0", name: "Fitness (CTL)", fill: true },
-        { vals: t.map((d) => d.tsb), color: "#1F6BEC", name: "Forma (TSB)" },
+        { vals: t.map((d) => d.ctl), color: "var(--zone-2)", name: "Fitness (CTL)", fill: true },
+        { vals: t.map((d) => d.tsb), color: "var(--accent)", name: "Forma (TSB)" },
       ],
       zeroLine: true, splitIndex: split,
     });
-  }).catch(() => { $("#form-svg").innerHTML = `<div class="sub">—</div>`; });
+  }).catch(() => { $("#form-svg").innerHTML = `<div class="vk-empty">—</div>`; });
 }
 
 // --- Pantalla ACTIVIDADES ---------------------------------------------------
@@ -356,37 +387,39 @@ const ZONE_OF_IF = (i) => (i == null ? "z2" : i < 0.60 ? "z1" : i < 0.76 ? "z2"
 
 function renderActivities(list) {
   const box = $("#activities-content");
-  if (!list.length) { box.innerHTML = `<div class="loading">Aún no hay entrenamientos.</div>`; return; }
-  box.innerHTML = list.map((a, i) => {
-    const stat = (v, k, u = "") => v == null ? "" : `<div class="am"><b>${v}${u}</b><span>${k}</span></div>`;
-    return `<div class="acard" data-i="${i}">
-      <div class="ahead">
-        <span class="adot ${ZONE_OF_IF(a.intensity)}"></span>
-        <div class="atitle"><b>${a.name || "Entrenamiento"}</b>
-          <span>${new Date(a.day).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short" })}${a.session_label ? " · " + a.session_label : ""}</span></div>
-        <span class="chev">${icon("chevron", 16)}</span>
+  if (!list.length) {
+    box.innerHTML = `<div class="vk-empty">Aún no hay entrenamientos importados.</div>`;
+    return;
+  }
+  box.innerHTML = `<div class="vk-section"><span class="vk-key">Tus entrenamientos</span>
+      <span class="vk-key">desde Strava</span></div>` + list.map((a, i) => {
+    const stat = (v, k) => v == null ? "" : `<div class="am"><b>${v}</b><span>${k}</span></div>`;
+    return `<div class="vk-panel acard" data-i="${i}">
+      <div class="arow">
+        <i class="vk-rail ${ZONE_OF_IF(a.intensity)}" style="height:34px"></i>
+        <span class="ao"><b>${a.name || "Entrenamiento"}</b>
+          <span>${new Date(a.day).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })}${a.session_label ? " · " + a.session_label : ""}</span></span>
       </div>
       <div class="amets">
         ${stat(hhmm(a.minutes), "tiempo")}
         ${stat(a.distance_km, "km")}
-        ${stat(a.np_w, "W norm.")}
+        ${stat(a.np_w, "W norm")}
         ${stat(a.tss, "TSS")}
       </div>
-      <div class="adetail" style="display:none" data-id="${a.id}">
-        <div class="loading" style="padding:12px">Cargando…</div>
+      <div class="adetail" hidden data-id="${a.id}">
+        <div class="vk-sk" style="height:120px;margin-top:12px"></div>
       </div>
     </div>`;
   }).join("");
   box.querySelectorAll(".acard").forEach((c) => {
-    c.querySelector(".ahead").addEventListener("click", async () => {
+    c.querySelector(".arow").addEventListener("click", async () => {
       const d = c.querySelector(".adetail");
-      const open = d.style.display !== "none";
-      d.style.display = open ? "none" : "block";
-      c.classList.toggle("open", !open);
+      const open = !d.hidden;
+      d.hidden = open;
       if (!open && !d.dataset.loaded) {        // detalle bajo demanda
         d.dataset.loaded = "1";
         try { d.innerHTML = activityDetailHtml(await api(`/api/activity/${d.dataset.id}`)); }
-        catch (e) { d.innerHTML = `<div class="loading">${e.detail || "Error."}</div>`; }
+        catch (e) { d.innerHTML = `<div class="vk-empty">${e.detail || "Error."}</div>`; }
       }
     });
   });
@@ -394,29 +427,32 @@ function renderActivities(list) {
 
 // Ficha del entrenamiento: qué fue realmente + métricas + zonas + series.
 function activityDetailHtml(d) {
-  const stat = (v, k, u = "") => v == null ? "" : `<div class="am"><b>${v}${u}</b><span>${k}</span></div>`;
+  const stat = (v, k) => v == null ? "" : `<div class="am"><b>${v}</b><span>${k}</span></div>`;
   const totalZ = (d.zones || []).reduce((s, z) => s + z.seconds, 0) || 1;
   const zbar = (d.zones || []).map((z) => {
     const cls = "z" + (z.zone.match(/Z(\d)/) || [0, 2])[1];
-    return `<div class="zrow"><span class="zl">${z.zone}</span>
-      <span class="ztrack"><span class="zfill ${cls}" style="width:${(z.seconds / totalZ * 100).toFixed(1)}%"></span></span>
-      <span class="zv">${hhmm(z.seconds / 60)}</span></div>`;
+    return `<div class="vk-zrow"><span style="width:88px">${z.zone}</span>
+      <span class="vk-ztrack"><span class="${cls}" style="width:${(z.seconds / totalZ * 100).toFixed(1)}%"></span></span>
+      <span class="vk-zv">${hhmm(z.seconds / 60)}</span></div>`;
   }).join("");
   const reps = (d.intervals || []).map((v, i) =>
     `<div class="irow"><span>#${i + 1}</span><b>${hhmm(v.seconds / 60)}</b>
-      <span>${v.avg_w} W</span><span class="ipct">${v.pct_ftp}% FTP</span></div>`).join("");
+      <span>${v.avg_w} W</span><span class="ipct">${v.pct_ftp} % FTP</span></div>`).join("");
   return `
-    ${d.session_label ? `<div class="skind">${d.session_label}${d.detected ? ` · ${d.detected}` : ""}</div>` : ""}
-    <p class="atext">${d.text}</p>
-    <div class="amets sub2">
-      ${stat(d.avg_power_w, "W media")}${stat(d.np_w, "W norm.")}
+    ${d.session_label ? `<div class="vk-chips" style="margin-top:12px">
+      <span class="vk-chip">${d.session_label}${d.detected ? ` · ${d.detected}` : ""}</span></div>` : ""}
+    <p class="vk-prose">${d.text}</p>
+    <div class="amets">
+      ${stat(d.avg_power_w, "W media")}${stat(d.np_w, "W norm")}
       ${stat(d.max_power_w, "W máx")}${stat(d.avg_hr, "ppm medio")}
       ${stat(d.max_hr, "ppm máx")}${stat(d.avg_cadence, "rpm")}
       ${stat(d.elevation_m, "m desnivel")}${stat(d.intensity, "IF")}
       ${stat(d.kilojoules, "kJ")}${stat(d.tss, "TSS")}
     </div>
-    ${zbar ? `<div class="ssec">Tiempo en zonas</div><div class="zones">${zbar}</div>` : ""}
-    ${reps ? `<div class="ssec">Series detectadas</div><div class="ivals">${reps}</div>` : ""}`;
+    ${zbar ? `<div class="vk-key" style="margin-top:14px">Tiempo en zonas</div>
+      <div style="margin-top:8px">${zbar}</div>` : ""}
+    ${reps ? `<div class="vk-key" style="margin-top:14px">Series detectadas</div>
+      <div style="margin-top:4px">${reps}</div>` : ""}`;
 }
 
 let activitiesLoaded = false;
@@ -424,7 +460,7 @@ async function loadActivities() {
   if (activitiesLoaded) return;
   $("#activities-content").innerHTML = SKELETON.rows;
   try { renderActivities(await api("/api/activities?limit=30")); activitiesLoaded = true; }
-  catch (e) { $("#activities-content").innerHTML = `<div class="loading">${e.detail || "Error."}</div>`; }
+  catch (e) { $("#activities-content").innerHTML = `<div class="vk-empty">${e.detail || "Error."}</div>`; }
 }
 
 // --- Pantalla PROGRESO ------------------------------------------------------
@@ -438,57 +474,57 @@ async function renderProgress() {
     api("/api/checkin").catch(() => null),
   ]);
   let html = "";
-  // Check-in diario: sueño + sensación. Es la única entrada de recuperación
-  // que tenemos sin wearable, y alimenta el CRI.
-  if (chk) html += checkinCard(chk);
+  // Curva de potencia (real vs modelo, interactiva) + coherencia del CP
+  if (pc) {
+    html += `<div class="vk-panel">
+      <div class="vk-section" style="margin:0"><span class="vk-key">Curva de potencia</span>
+        <span class="vk-key">120 días</span></div>
+      <div id="pc-chart" style="margin-top:10px"></div>
+      <div class="vk-chips" style="margin-top:10px">
+        <span class="vk-chip"><i style="width:8px;height:8px;border-radius:999px;background:var(--accent);display:inline-block"></i>Real</span>
+        <span class="vk-chip"><i style="width:8px;height:8px;border-radius:999px;background:var(--zone-2);display:inline-block"></i>Modelo CP/W′</span>
+        ${pc.verdict ? `<span class="vk-chip ${pc.coherent ? "vk-chip--ok" : "vk-chip--warn"}">${pc.verdict}</span>` : ""}
+      </div></div>`;
+  }
+  // Tu motor: CP y W′ como tiles tintados.
+  if (ftp.length) {
+    const cur = ftp[ftp.length - 1];
+    html += `<div class="vk-tiles">
+      <div class="vk-tile t-engine"><span class="vk-key">FTP</span><b>${cur.ftp}</b><small>watts</small></div>
+      <div class="vk-tile t-load"><span class="vk-key">CP</span><b>${cur.cp}</b><small>watts</small></div>
+    </div>`;
+  }
   // Cumplimiento del plan: lo prescrito vs lo hecho (cierra el bucle).
   if (comp) {
     if (comp.rate == null) {
-      html += `<div class="card"><h3>Cumplimiento del plan</h3>
-        <div class="sub">${comp.note}</div></div>`;
+      html += `<div class="vk-panel"><div class="vk-key">Cumplimiento</div>
+        <p class="vk-prose">${comp.note}</p></div>`;
     } else {
       const ST = {
-        cumplido: ["ok", "Cumplido"], descanso_ok: ["ok", "Descanso"],
-        más: ["warn", "Más carga"], menos: ["warn", "Menos carga"],
-        distinto: ["warn", "Otra sesión"], no_hecho: ["bad", "No hecho"],
-        extra: ["info", "Extra"],
+        cumplido: ["vk-chip--ok", "Cumplido"], descanso_ok: ["vk-chip--ok", "Descanso"],
+        "más": ["vk-chip--warn", "Más"], menos: ["vk-chip--warn", "Menos"],
+        distinto: ["vk-chip--warn", "Otra"], no_hecho: ["vk-chip--bad", "No hecho"],
+        extra: ["vk-chip--accent", "Extra"],
       };
       const rows = comp.days.slice(-10).reverse().map((d) => {
-        const [cls, label] = ST[d.status] || ["info", d.status];
+        const [cls, label] = ST[d.status] || ["", d.status];
         return `<div class="cmrow"><span class="cmd">${shortDate(d.day)}</span>
-          <span class="cmtag ${cls}">${label}</span>
+          <span class="vk-chip ${cls}">${label}</span>
           <span class="cmn">${d.note}</span></div>`;
       }).join("");
       const pct = Math.round(comp.rate * 100);
-      html += `<div class="card"><h3>Cumplimiento del plan</h3>
-        <div class="sub">Últimos 28 días · lo prescrito vs lo que hiciste</div>
-        <div class="cmhead">
-          <div><b class="cmbig">${pct}%</b><span>seguido</span></div>
-          <div><b class="cmbig">${comp.tss_done}</b><span>TSS hecho</span></div>
-          <div><b class="cmbig">${comp.tss_planned}</b><span>TSS previsto</span></div>
-        </div>
-        <div class="cmbar"><span style="width:${pct}%"></span></div>
-        <div class="cmlist">${rows}</div></div>`;
+      html += `<div class="vk-panel">
+        <div class="vk-section" style="margin:0"><span class="vk-key">Cumplimiento · 28 d</span>
+          <span style="font-family:var(--font-display);font-weight:700;font-size:var(--text-21)">${pct} %</span></div>
+        <div class="vk-bar" style="margin-top:10px"><span style="width:${pct}%"></span></div>
+        <div class="vk-axis"><span>${comp.tss_done} TSS hecho</span><span>${comp.tss_planned} previsto</span></div>
+        <div style="margin-top:8px">${rows}</div></div>`;
     }
   }
-  // Tu motor: número actual (FTP/CP) — sin gráfica.
-  if (ftp.length) {
-    const cur = ftp[ftp.length - 1];
-    html += `<div class="card"><h3>Tu motor</h3>
-      <div class="motor-row">
-        <div class="motor"><span class="mk">FTP</span><span class="mv">${cur.ftp}<i>W</i></span></div>
-        <div class="motor"><span class="mk">CP</span><span class="mv">${cur.cp}<i>W</i></span></div>
-      </div></div>`;
-  }
-  // Curva de potencia (real vs modelo, interactiva) + coherencia del CP
-  if (pc) {
-    html += `<div class="card"><h3>Curva de potencia</h3>
-      <div class="sub">Tu mejor real (120 d) vs modelo CP/W' · toca la gráfica</div>
-      <div id="pc-chart"></div>
-      ${legend([{ color: "#12A9E0", label: "Real (potencia máx.)" }, { color: "#1F6BEC", label: "Modelo CP/W'" }])}
-      ${pc.verdict ? `<div class="verdict ${pc.coherent ? "ok" : "warn"}">${pc.verdict}</div>` : ""}</div>`;
-  }
-  box.innerHTML = html || `<div class="loading">Sin datos de potencia todavía.</div>`;
+  // Check-in diario: sueño + sensación. Es la única entrada de recuperación
+  // que tenemos sin wearable, y alimenta el CRI.
+  if (chk) html += checkinCard(chk);
+  box.innerHTML = html || `<div class="vk-empty">Sin datos de potencia todavía.</div>`;
   if (pc) mountPowerChart($("#pc-chart"), pc.points, pc.cp);
   if (chk) wireCheckin();
 }
@@ -503,19 +539,21 @@ function checkinCard(c) {
   const done = !c.pending;
   const sleep = c.sleep_hours ?? c.last_sleep ?? 7.5;
   const feel = Math.round(c.feel ?? c.last_feel ?? 6);
-  return `<div class="card" id="checkin">
-    <h3>¿Cómo has dormido?</h3>
-    <div class="sub">${done
+  return `<div class="vk-panel" id="checkin">
+    <div class="vk-key">Check-in de hoy</div>
+    <p class="vk-prose">${done
       ? "Registrado hoy. Puedes corregirlo si quieres."
-      : "Sin reloj no se puede medir el sueño, así que se pregunta. Tu propia percepción es una señal válida — alimenta la Recuperación del CRI."}</div>
-    <div class="ckrow"><span>Horas dormidas</span>
-      <input type="range" id="ck-sleep" min="0" max="12" step="0.25" value="${sleep}" />
-      <b id="ck-sleepl">${hhmm(sleep * 60)} h</b></div>
-    <div class="ckrow"><span>Cómo te sientes</span>
-      <input type="range" id="ck-feel" min="1" max="10" step="1" value="${feel}" />
-      <b id="ck-feell">${feel}/10 · ${FEEL_WORDS[feel]}</b></div>
-    <button id="ck-save">${done ? "Actualizar" : "Guardar check-in"}</button>
-    <span class="ckmsg" id="ck-msg"></span>
+      : "Sin reloj no se puede medir el sueño, así que se pregunta. Tu percepción alimenta la recuperación del CRI."}</p>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">
+      <div class="ctl"><span class="vk-key">Sueño</span>
+        <input class="slider" type="range" id="ck-sleep" min="0" max="12" step="0.25" value="${sleep}" />
+        <b id="ck-sleepl">${hhmm(sleep * 60)} h</b></div>
+      <div class="ctl"><span class="vk-key">Sensación</span>
+        <input class="slider" type="range" id="ck-feel" min="1" max="10" step="1" value="${feel}" />
+        <b id="ck-feell">${feel}/10</b></div>
+      <button class="vk-btn" id="ck-save">${done ? "Actualizar" : "Guardar check-in"}</button>
+      <span class="vk-key" id="ck-msg"></span>
+    </div>
   </div>`;
 }
 
@@ -524,20 +562,21 @@ function wireCheckin() {
   if (!s) return;
   s.addEventListener("input", () => { $("#ck-sleepl").textContent = hhmm(+s.value * 60) + " h"; });
   f.addEventListener("input", () => {
-    $("#ck-feell").textContent = `${f.value}/10 · ${FEEL_WORDS[f.value]}`;
+    $("#ck-feell").textContent = `${f.value}/10`;
+    f.title = FEEL_WORDS[f.value];
   });
   $("#ck-save").addEventListener("click", async () => {
-    msg.textContent = "Guardando…"; msg.className = "ckmsg";
+    msg.textContent = "Guardando…"; msg.className = "vk-key";
     try {
       await api("/api/checkin", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sleep_hours: +s.value, feel: +f.value }),
       });
-      msg.textContent = "Guardado ✓"; msg.className = "ckmsg ok";
+      msg.textContent = "Guardado ✓"; msg.className = "vk-key" ; msg.style.color = "var(--ok)";
       checkinPending = false;
       loadHome();                    // el CRI cambia: refresca la portada
     } catch (e) {
-      msg.textContent = e.detail || "No se pudo guardar."; msg.className = "ckmsg bad";
+      msg.textContent = e.detail || "No se pudo guardar."; msg.className = "vk-key" ; msg.style.color = "var(--bad)";
     }
   });
 }
@@ -553,51 +592,59 @@ const PHASE_ES = {
 };
 
 function renderHorizon(days) {
-  if (!days.length) { $("#horizon-content").innerHTML = `<div class="loading">Sin datos.</div>`; return; }
+  if (!days.length) { $("#horizon-content").innerHTML = `<div class="vk-empty">Sin datos.</div>`; return; }
   const names = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
-  $("#horizon-content").innerHTML = days.map((h, i) => {
-    const d = i === 0 ? "HOY" : names[new Date(h.day).getDay()];
+  const totalTss = days.reduce((s, h) => s + (h.tss || 0), 0);
+  $("#horizon-content").innerHTML = `
+    <div class="vk-section"><span class="vk-key">Próximos 7 días</span>
+      <span class="vk-key">solo hoy se compromete</span></div>` +
+    days.map((h, i) => {
+    const d = i === 0 ? "Hoy" : names[new Date(h.day).getDay()];
     const blocks = (h.targets && h.targets.length)
-      ? h.targets.map(blockHtml).join("")
-      : `<div class="empty">${h.objective === "rest" ? "Día libre — sin sesión." : ""}</div>`;
+      ? `<div class="vk-blocks">${h.targets.map(blockHtml).join("")}</div>` : "";
     const why = (h.rationale || "").replace(/\[/g, "· ").replace(/\]/g, "");
     return `<div class="hitem" data-day="${h.day}">
-      <div class="hrow"><span class="d">${d}</span>
-        <span class="o">${h.objective.replace("_", " ")}<br><span style="color:var(--muted);font-size:12px">${h.session}</span></span>
-        <span class="t"><b class="hdur">${h.minutes ? hhmm(h.minutes) + " h" : "libre"}</b><br>${h.tss} TSS</span>
-        <span class="chev">${icon("chevron", 14)}</span></div>
-      <div class="hdetail" style="display:none">
-        ${h.description ? `<p class="hdesc">${h.description}</p>` : ""}
+      <button class="hrow"><span class="hd">${d}</span>
+        <span class="ho"><b>${h.session}</b>
+          <span>${h.objective.replace("_", " ")}${h.intensity != null ? ` · IF ${h.intensity.toFixed(2)}` : ""}</span></span>
+        <span class="ht"><b>${h.minutes ? hhmm(h.minutes) + " h" : "libre"}</b><span>${h.tss} TSS</span></span></button>
+      <div class="hdetail" hidden>
+        ${h.description ? `<p class="vk-prose" style="margin:0 0 12px">${h.description}</p>` : ""}
         <div class="hstats">
           <div class="hs"><b>${hhmm(h.minutes)}</b><span>duración</span></div>
           <div class="hs"><b>${h.tss}</b><span>TSS</span></div>
           <div class="hs"><b>${h.intensity != null ? h.intensity.toFixed(2) : "—"}</b><span>IF</span></div>
-          <div class="hs"><b>${signed(h.tsb)}</b><span>forma ese día</span></div>
+          <div class="hs"><b>${signed(h.tsb)}</b><span>forma</span></div>
           <div class="hs"><b>${h.ctl}</b><span>fitness</span></div>
           <div class="hs"><b>${PHASE_ES[h.phase] || h.phase}</b><span>fase</span></div>
         </div>
         ${blocks}
-        ${why ? `<div class="hwhy"><b>Por qué:</b> ${why}</div>` : ""}
-        <div class="dayctl">
-          <div class="dayrow"><span>Tiempo ese día</span>
-            <input type="range" class="dmin" min="0" max="360" step="15" value="${h.minutes || 0}" />
+        ${why ? `<div class="vk-note" style="margin-top:12px"><b>Por qué</b><span>${why}</span></div>` : ""}
+        <div style="margin-top:14px;display:flex;flex-direction:column;gap:10px">
+          <div class="ctl"><span class="vk-key">Tiempo</span>
+            <input class="slider dmin" type="range" min="0" max="360" step="15" value="${h.minutes || 0}" />
             <b class="dminl">${h.minutes ? hhmm(h.minutes) : "libre"}</b></div>
-          <div class="dayrow"><span>Entrenamiento</span>
-            <select class="dobj">${OBJECTIVES.map(([v, l]) =>
+          <div class="ctl"><span class="vk-key">Sesión</span>
+            <select class="vk-input dobj">${OBJECTIVES.map(([v, l]) =>
               `<option value="${v}">${l}</option>`).join("")}</select></div>
-          <button class="dsave">Guardar este día</button>
-          <span class="dmsg"></span>
+          <button class="vk-btn dsave" style="padding:11px;font-size:14px">Guardar este día</button>
+          <span class="vk-key dmsg"></span>
         </div>
       </div>
     </div>`;
-  }).join("");
+  }).join("") + `
+    <div class="vk-panel" style="margin-top:4px">
+      <div class="vk-key">Carga de la semana</div>
+      <div class="vk-axis" style="margin-top:10px"><span>${totalTss} TSS previstos en 7 días</span>
+        <span>${Math.round(totalTss / 7)} TSS/día</span></div>
+    </div>`;
 
   $("#horizon-content").querySelectorAll(".hitem").forEach((item) => {
     const row = item.querySelector(".hrow"), det = item.querySelector(".hdetail");
     row.addEventListener("click", async () => {
-      const open = det.style.display !== "none";
-      det.style.display = open ? "none" : "block";
-      row.classList.toggle("open", !open);
+      const open = !det.hidden;
+      det.hidden = open;
+      row.classList.toggle("is-open", !open);
       if (!open && !det.dataset.init) {          // estado guardado de ese día
         det.dataset.init = "1";
         try {
@@ -635,83 +682,83 @@ async function renderSettings() {
   box.innerHTML = SKELETON.cards;
   let s;
   try { s = await api("/api/settings"); }
-  catch (e) { box.innerHTML = `<div class="loading">${e.detail || "Error cargando ajustes."}</div>`; return; }
+  catch (e) { box.innerHTML = `<div class="vk-empty">${e.detail || "Error cargando ajustes."}</div>`; return; }
 
   const wp = s.w_prime != null ? (s.w_prime / 1000).toFixed(1) + " kJ" : "—";
   const goal = s.goal
-    ? `<div class="setrow"><span>${s.goal.name || "Evento"}</span><span class="v">${shortDate(s.goal.date)} · faltan ${s.goal.days_to} d</span></div>`
+    ? `<div class="vrow"><span>${s.goal.name || "Evento"}</span><span class="vval">${shortDate(s.goal.date)} · faltan ${s.goal.days_to} d</span></div>`
     : `<div class="sub">Sin objetivo. Añade uno para activar la periodización (fase/taper).</div>`;
   const llmHost = (() => { try { return new URL(s.llm.base_url).host; } catch { return s.llm.base_url; } })();
   const st = s.strava || { connected: false, can_connect: false };
 
   box.innerHTML = `
-    <div class="card"><h3>Perfil y disponibilidad</h3>
+    <div class="vk-panel"><div class="vk-panel-title">Perfil y disponibilidad</div>
       <div class="sub">Tus datos y cuánto tiempo tienes cada día. El plan encaja las sesiones en tu disponibilidad.</div>
-      <button id="edit-profile" class="btn-full" style="margin-top:10px">Editar perfil y disponibilidad</button>
+      <button id="edit-profile" class="vk-btn vk-btn--quiet" style="margin-top:10px">Editar perfil y disponibilidad</button>
     </div>
 
-    <div class="card"><h3>Tu motor</h3>
-      <div class="setrow"><span>FTP</span><span class="v">${fmt(s.ftp)} W</span></div>
-      <div class="setrow"><span>CP (potencia crítica)</span><span class="v">${fmt(s.cp)} W</span></div>
-      <div class="setrow"><span>W′ (reserva anaeróbica)</span><span class="v">${wp}</span></div>
+    <div class="vk-panel"><div class="vk-panel-title">Tu motor</div>
+      <div class="vrow"><span>FTP</span><span class="vval">${fmt(s.ftp)} W</span></div>
+      <div class="vrow"><span>CP (potencia crítica)</span><span class="vval">${fmt(s.cp)} W</span></div>
+      <div class="vrow"><span>W′ (reserva anaeróbica)</span><span class="vval">${wp}</span></div>
       <div class="sub" style="margin-top:8px">Se recalibra solo cuando entran entrenamientos nuevos con potencia.</div>
-      <button id="calib-now" class="btn-full">Recalibrar ahora</button>
+      <button id="calib-now" class="vk-btn vk-btn--quiet">Recalibrar ahora</button>
       <div id="calib-msg" class="sub"></div>
     </div>
 
-    <div class="card"><h3>Objetivo</h3>
+    <div class="vk-panel"><div class="vk-panel-title">Objetivo</div>
       ${goal}
       <div class="goalform">
-        <input id="goal-name" placeholder="Nombre (p. ej. Gran Fondo de León)" autocomplete="off" />
-        <input id="goal-date" type="date" />
-        <select id="goal-kind">${kindOptions()}</select>
-        <select id="goal-prio"><option value="A">A · principal</option><option value="B">B</option><option value="C">C</option></select>
-        <button id="goal-save">Guardar objetivo</button>
+        <input class="vk-input" id="goal-name" placeholder="Nombre (p. ej. Gran Fondo de León)" autocomplete="off" />
+        <input class="vk-input" id="goal-date" type="date" />
+        <select class="vk-input" id="goal-kind">${kindOptions()}</select>
+        <select class="vk-input" id="goal-prio"><option value="A">A · principal</option><option value="B">B</option><option value="C">C</option></select>
+        <button class="vk-btn" id="goal-save">Guardar objetivo</button>
       </div>
       <div id="goal-msg" class="sub"></div>
     </div>
 
-    <div class="card"><h3>Datos</h3>
-      <div class="setrow"><span>Strava</span><span class="v">${st.connected
-        ? '<span class="stat-dot ok"></span>conectado' : '<span class="stat-dot warn"></span>sin conectar'}</span></div>
-      <div class="setrow"><span>Actividades importadas</span><span class="v">${s.activities}</span></div>
-      <div class="setrow"><span>Última actividad</span><span class="v">${s.last_activity ? shortDate(s.last_activity) : "—"}</span></div>
+    <div class="vk-panel"><div class="vk-panel-title">Datos</div>
+      <div class="vrow"><span>Strava</span><span class="vval">${st.connected
+        ? '<span class="dot" style="background:var(--ok)"></span>conectado' : '<span class="dot" style="background:var(--warn)"></span>sin conectar'}</span></div>
+      <div class="vrow"><span>Actividades importadas</span><span class="vval">${s.activities}</span></div>
+      <div class="vrow"><span>Última actividad</span><span class="vval">${s.last_activity ? shortDate(s.last_activity) : "—"}</span></div>
       ${st.connected
         ? `<div class="sub" style="margin:8px 0">Los entrenamientos entran solos desde Strava. Puedes forzar una sincronización ahora:</div>
-           <button id="sync-now" class="btn-full">${icon("refresh", 18)} Sincronizar con Strava</button>
+           <button id="sync-now" class="vk-btn vk-btn--quiet">${icon("refresh", 18)} Sincronizar con Strava</button>
            <div id="sync-msg" class="sub"></div>
-           <button id="strava-off" class="btn-full" style="margin-top:8px;background:var(--card-2);color:var(--muted)">Desconectar Strava</button>`
+           <button id="strava-off" class="vk-btn vk-btn--quiet" style="margin-top:8px;background:var(--card-2);color:var(--muted)">Desconectar Strava</button>`
         : st.can_connect
           ? `<div class="sub" style="margin:8px 0">Este perfil aún no tiene Strava. Conéctalo para que tus entrenamientos entren solos.</div>
-             <button id="strava-on" class="btn-full">Conectar mi Strava</button>`
+             <button id="strava-on" class="vk-btn vk-btn--quiet">Conectar mi Strava</button>`
           : `<div class="sub" style="margin:8px 0">Faltan las credenciales de Strava en el archivo <code>.env</code> del servidor.</div>`}
       <div id="strava-msg" class="sub"></div>
     </div>
 
-    <div class="card"><h3>Vikon IA</h3>
-      <div class="setrow"><span>Estado</span><span class="v">${s.llm.configured
-        ? '<span class="stat-dot ok"></span>conectada' : '<span class="stat-dot warn"></span>sin clave'}</span></div>
-      <div class="setrow"><span>Modelo</span><span class="v">${s.llm.model}</span></div>
-      <div class="setrow"><span>Proveedor</span><span class="v">${llmHost}</span></div>
+    <div class="vk-panel"><div class="vk-panel-title">Vikon IA</div>
+      <div class="vrow"><span>Estado</span><span class="vval">${s.llm.configured
+        ? '<span class="dot" style="background:var(--ok)"></span>conectada' : '<span class="dot" style="background:var(--warn)"></span>sin clave'}</span></div>
+      <div class="vrow"><span>Modelo</span><span class="vval">${s.llm.model}</span></div>
+      <div class="vrow"><span>Proveedor</span><span class="vval">${llmHost}</span></div>
       ${s.llm.configured ? "" : `<div class="sub" style="margin-top:8px">Añade tu clave en el archivo <code>.env</code> para activar el chat.</div>`}
     </div>
 
-    <div class="card"><h3>Legal</h3>
+    <div class="vk-panel"><div class="vk-panel-title">Legal</div>
       <div class="sub">Vikon planifica entrenamiento deportivo. <strong>No es consejo médico</strong>: consulta a tu médico antes de empezar, y para si notas dolor en el pecho, mareo o falta de aire.</div>
-      <div class="setrow"><span>Privacidad</span><span class="v"><a href="/static/privacidad.html" target="_blank" rel="noopener">Ver</a></span></div>
-      <div class="setrow"><span>Términos de servicio</span><span class="v"><a href="/static/terminos.html" target="_blank" rel="noopener">Ver</a></span></div>
+      <div class="vrow"><span>Privacidad</span><span class="vval"><a href="/static/privacidad.html" target="_blank" rel="noopener">Ver</a></span></div>
+      <div class="vrow"><span>Términos de servicio</span><span class="vval"><a href="/static/terminos.html" target="_blank" rel="noopener">Ver</a></span></div>
     </div>
 
-    <div class="card"><h3>Tus datos</h3>
+    <div class="vk-panel"><div class="vk-panel-title">Tus datos</div>
       <div class="sub">Puedes llevarte todo lo que Vikon guarda sobre ti, o borrarlo por completo.</div>
-      <button id="export-data" class="btn-full" style="margin-top:12px;background:var(--card-2);color:var(--text)">Descargar mis datos</button>
-      <button id="delete-account" class="btn-full" style="margin-top:8px;background:var(--card-2);color:#C0392B">Borrar mi cuenta</button>
+      <button id="export-data" class="vk-btn vk-btn--quiet" style="margin-top:12px;background:var(--card-2);color:var(--text)">Descargar mis datos</button>
+      <button id="delete-account" class="vk-btn vk-btn--quiet" style="margin-top:8px;background:var(--card-2);color:#C0392B">Borrar mi cuenta</button>
       <div id="account-msg" class="sub" style="margin-top:8px"></div>
     </div>
 
-    <div class="card"><h3>Cuenta</h3>
+    <div class="vk-panel"><div class="vk-panel-title">Cuenta</div>
       <div class="sub">Vikon · entrenador de ciclismo con gemelo digital. El motor decide; la IA explica.</div>
-      <button id="logout-btn" class="btn-full" style="margin-top:12px;background:var(--card-2);color:var(--text)">Cerrar sesión</button>
+      <button id="logout-btn" class="vk-btn vk-btn--quiet" style="margin-top:12px;background:var(--card-2);color:var(--text)">Cerrar sesión</button>
     </div>`;
 
   $("#edit-profile").addEventListener("click", () => showProfile({ onboarding: false }));
@@ -806,7 +853,7 @@ function handleStravaReturn() {
   history.replaceState({}, "", window.location.pathname);
   const [cls, text] = STRAVA_BACK[p] || ["bad", "Respuesta desconocida de Strava."];
   const el = document.createElement("div");
-  el.className = "toast " + cls;
+  el.className = "vk-toast vk-toast--" + cls;
   el.textContent = text;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 6000);
@@ -836,7 +883,7 @@ function showAuth(hasUsers) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      $("#auth").style.display = "none";
+      $("#auth").classList.remove("is-open");
       // PWA: registra el service worker para poder instalarla en el móvil.
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () =>
@@ -849,11 +896,11 @@ boot();                       // ahora autenticado → onboarding o app
   const render = () => {
     $("#auth-card").innerHTML = `
       <h2>Bienvenido a <span>Vikon</span></h2>
-      <div class="lead">${mode === "login" ? "Entra en tu cuenta." : "Crea tu cuenta para empezar."}</div>
+      <div class="vk-prose">${mode === "login" ? "Entra en tu cuenta." : "Crea tu cuenta para empezar."}</div>
       <div class="field"><label>Usuario</label>
-        <input id="au-user" autocomplete="username" placeholder="tu usuario" /></div>
+        <input class="vk-input" id="au-user" autocomplete="username" placeholder="tu usuario" /></div>
       <div class="field"><label>Contraseña</label>
-        <input id="au-pass" type="password" placeholder="••••••"
+        <input class="vk-input" id="au-pass" type="password" placeholder="••••••"
           autocomplete="${mode === "login" ? "current-password" : "new-password"}" /></div>
       ${mode === "register" ? `
       <label class="consent">
@@ -868,7 +915,7 @@ boot();                       // ahora autenticado → onboarding o app
         <span>Consiento que mis métricas se envíen a un proveedor de <strong>IA</strong>
         para redactar las explicaciones. <em>Opcional: Vikon funciona entero sin esto.</em></span>
       </label>` : ""}
-      <div class="ob-actions"><button id="au-submit">${mode === "login" ? "Entrar" : "Crear cuenta"}</button></div>
+      <div class="obact"><button class="vk-btn" id="au-submit">${mode === "login" ? "Entrar" : "Crear cuenta"}</button></div>
       <div class="ob-skip"><a id="au-toggle">${mode === "login"
         ? "¿No tienes cuenta? Crear una" : "¿Ya tienes cuenta? Entrar"}</a></div>
       ${mode === "login" ? `<div class="ob-skip" style="margin-top:6px">
@@ -888,7 +935,7 @@ boot();                       // ahora autenticado → onboarding o app
     $("#au-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
   };
   render();
-  $("#auth").style.display = "flex";
+  $("#auth").classList.add("is-open");
   window.scrollTo(0, 0);
 }
 
@@ -937,65 +984,65 @@ function profileFormHtml(p, onboarding) {
   const days = DAYS.map((d, i) => {
     const v = av[i] != null ? av[i] : 0;
     return `<div class="row"><span class="day">${d}</span>
-      <input type="range" min="0" max="360" step="15" id="av-${i}" value="${v}" />
+      <input class="slider" type="range" min="0" max="360" step="15" id="av-${i}" value="${v}" />
       <span class="u" id="avl-${i}">${v ? hhmm(v) : "libre"}</span></div>`;
   }).join("");
   const opt = (val, label) => `<option value="${val}"${p.level === val ? " selected" : ""}>${label}</option>`;
   return `
     <h2>${onboarding ? "Bienvenido a <span>Vikon</span>" : "Perfil y disponibilidad"}</h2>
-    <div class="lead">${onboarding
+    <div class="vk-prose">${onboarding
       ? "Cuéntame lo básico para ajustar tu entrenamiento. Los datos físicos son opcionales."
       : "Edita tus datos y tu disponibilidad semanal."}</div>
 
-    <div class="ob-sec">Sobre ti</div>
-    <div class="field"><label>Nombre</label><input id="pf-name" value="${v(p.name)}" placeholder="Tu nombre" /></div>
+    <div class="vk-key">Sobre ti</div>
+    <div class="field"><label>Nombre</label><input class="vk-input" id="pf-name" value="${v(p.name)}" placeholder="Tu nombre" /></div>
     <div class="field"><label>Nivel deportivo</label>
-      <select id="pf-level"><option value="">—</option>
+      <select class="vk-input" id="pf-level"><option value="">—</option>
         ${opt("principiante", "Principiante")}${opt("intermedio", "Intermedio")}
         ${opt("avanzado", "Avanzado")}${opt("elite", "Élite")}
       </select></div>
     <div class="field"><label>FTP declarado (W)</label>
-      <input type="number" id="pf-ftp" value="${v(p.declared_ftp_w)}" placeholder="${p._est_ftp || "vatios"}" /></div>
+      <input class="vk-input" type="number" id="pf-ftp" value="${v(p.declared_ftp_w)}" placeholder="${p._est_ftp || "vatios"}" /></div>
 
-    <div class="ob-sec">Objetivo <span class="opt">· opcional</span></div>
+    <div class="vk-key">Objetivo <span class="opt">· opcional</span></div>
     <div class="grid2">
-      <div class="field"><label>Evento</label><input id="pf-goal-name" value="${v(p.goal && p.goal.name)}" placeholder="Gran Fondo…" /></div>
-      <div class="field"><label>Fecha</label><input type="date" id="pf-goal-date" value="${v(p.goal && p.goal.date)}" /></div>
-      <div class="field"><label>Tipo</label><select id="pf-goal-kind">${kindOptions(p.goal && p.goal.kind)}</select></div>
-      <div class="field"><label>Prioridad</label><select id="pf-goal-prio">
+      <div class="field"><label>Evento</label><input class="vk-input" id="pf-goal-name" value="${v(p.goal && p.goal.name)}" placeholder="Gran Fondo…" /></div>
+      <div class="field"><label>Fecha</label><input class="vk-input" type="date" id="pf-goal-date" value="${v(p.goal && p.goal.date)}" /></div>
+      <div class="field"><label>Tipo</label><select class="vk-input" id="pf-goal-kind">${kindOptions(p.goal && p.goal.kind)}</select></div>
+      <div class="field"><label>Prioridad</label><select class="vk-input" id="pf-goal-prio">
         <option value="A">A · principal</option><option value="B">B</option><option value="C">C</option></select></div>
     </div>
 
-    <div class="ob-sec">Datos físicos <span class="opt">· opcional</span></div>
+    <div class="vk-key">Datos físicos <span class="opt">· opcional</span></div>
     <div class="grid2">
-      <div class="field"><label>Sexo</label><select id="pf-sex">
+      <div class="field"><label>Sexo</label><select class="vk-input" id="pf-sex">
         <option value=""${!p.sex ? " selected" : ""}>—</option>
         <option value="M"${p.sex === "M" ? " selected" : ""}>Hombre</option>
         <option value="F"${p.sex === "F" ? " selected" : ""}>Mujer</option></select></div>
-      <div class="field"><label>Nacimiento</label><input type="date" id="pf-birth" value="${v(p.birthdate)}" /></div>
-      <div class="field"><label>Altura (cm)</label><input type="number" id="pf-height" value="${v(p.height_cm)}" /></div>
-      <div class="field"><label>Peso (kg)</label><input type="number" step="0.1" id="pf-weight" value="${v(p.weight_kg)}" /></div>
-      <div class="field"><label>FC máx</label><input type="number" id="pf-hrmax" value="${v(p.hr_max)}" /></div>
-      <div class="field"><label>FC reposo</label><input type="number" id="pf-hrrest" value="${v(p.hr_rest)}" /></div>
+      <div class="field"><label>Nacimiento</label><input class="vk-input" type="date" id="pf-birth" value="${v(p.birthdate)}" /></div>
+      <div class="field"><label>Altura (cm)</label><input class="vk-input" type="number" id="pf-height" value="${v(p.height_cm)}" /></div>
+      <div class="field"><label>Peso (kg)</label><input class="vk-input" type="number" step="0.1" id="pf-weight" value="${v(p.weight_kg)}" /></div>
+      <div class="field"><label>FC máx</label><input class="vk-input" type="number" id="pf-hrmax" value="${v(p.hr_max)}" /></div>
+      <div class="field"><label>FC reposo</label><input class="vk-input" type="number" id="pf-hrrest" value="${v(p.hr_rest)}" /></div>
     </div>
 
-    <div class="ob-sec">Disponibilidad semanal</div>
-    <div class="lead" style="margin:-4px 2px 10px">Minutos que puedes entrenar cada día. Un día en 0 = descanso.</div>
+    <div class="vk-key">Disponibilidad semanal</div>
+    <div class="vk-prose" style="margin:-4px 2px 10px">Minutos que puedes entrenar cada día. Un día en 0 = descanso.</div>
     <div class="avail">${days}</div>
     <div class="avail-total">Total disponible: <b id="av-sum">0:00</b> h</div>
 
-    <div class="ob-sec">¿Cuánto quieres entrenar?</div>
-    <div class="lead" style="margin:-4px 2px 10px">Tener hueco no es querer entrenarlo.
+    <div class="vk-key">¿Cuánto quieres entrenar?</div>
+    <div class="vk-prose" style="margin:-4px 2px 10px">Tener hueco no es querer entrenarlo.
       Esto es el presupuesto de la semana: el plan no lo pasará.</div>
     <div class="ckrow"><span>Objetivo semanal</span>
       <!-- max amplio de salida: el navegador RECORTA el value al max al
            parsear, y el tope real (la suma de tu disponibilidad) aún no se
            conoce aquí. recompute() lo estrecha en cuanto se monta. -->
-      <input type="range" id="pf-weekly" min="0" max="2520" step="15"
+      <input class="slider" type="range" id="pf-weekly" min="0" max="2520" step="15"
              value="${p.weekly_minutes_target ?? 480}" />
       <b id="pf-weeklyl">—</b></div>
 
-    <div class="ob-actions"><button id="pf-save">${onboarding ? "Empezar" : "Guardar"}</button></div>
+    <div class="obact"><button class="vk-btn" id="pf-save">${onboarding ? "Empezar" : "Guardar"}</button></div>
     ${onboarding ? `<div class="ob-skip"><a id="pf-skip">Saltar por ahora</a></div>` : ""}
     <div id="ob-msg"></div>`;
 }
@@ -1007,7 +1054,7 @@ async function showProfile({ onboarding }) {
     try { const st = await api("/api/settings"); if (st.ftp) p._est_ftp = Math.round(st.ftp); } catch (_) {}
   }
   $("#ob-card").innerHTML = profileFormHtml(p, onboarding);
-  $("#onboarding").style.display = "flex";
+  $("#onboarding").classList.add("is-open");
   window.scrollTo(0, 0);
   const wk = $("#pf-weekly"), wkl = $("#pf-weeklyl");
   const recompute = () => {
@@ -1028,7 +1075,7 @@ async function showProfile({ onboarding }) {
   for (let i = 0; i < 7; i++) $(`#av-${i}`).addEventListener("input", recompute);
   recompute();
   $("#pf-save").addEventListener("click", () => submitProfile(onboarding));
-  if (onboarding) $("#pf-skip").addEventListener("click", () => { $("#onboarding").style.display = "none"; syncThenLoad(); });
+  if (onboarding) $("#pf-skip").addEventListener("click", () => { $("#onboarding").classList.remove("is-open"); syncThenLoad(); });
 }
 
 async function submitProfile(onboarding) {
@@ -1047,7 +1094,7 @@ async function submitProfile(onboarding) {
   const btn = $("#pf-save"); btn.disabled = true;
   try {
     await api("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    $("#onboarding").style.display = "none";
+    $("#onboarding").classList.remove("is-open");
     horizonLoaded = false;
     if (onboarding) { syncThenLoad(); }
     else { loadHome(); renderSettings(); }
@@ -1057,7 +1104,7 @@ async function submitProfile(onboarding) {
 // --- Chat -------------------------------------------------------------------
 function addMsg(text, cls) {
   const el = document.createElement("div");
-  el.className = "msg " + cls; el.textContent = text;
+  el.className = "vk-msg vk-msg--" + cls; el.textContent = text;
   $("#chat-log").appendChild(el);
   el.scrollIntoView({ behavior: "smooth", block: "end" });
 }
@@ -1066,7 +1113,7 @@ async function sendChat() {
   if (!msg) return;
   addMsg(msg, "user"); input.value = "";
   const pending = document.createElement("div");
-  pending.className = "msg bot"; pending.textContent = "…";
+  pending.className = "vk-msg vk-msg--bot"; pending.textContent = "…";
   $("#chat-log").appendChild(pending);
   // Streaming: la respuesta se va escribiendo según llega (SSE), en vez de
   // esperar al mensaje entero. Si algo falla, cae al modo clásico.
@@ -1180,13 +1227,13 @@ async function loadHome() {
     renderHome(await api("/api/state"));
     $("#home-content").dataset.ready = "1";
   }
-  catch (e) { $("#home-content").innerHTML = `<div class="loading">${e.detail || "Error cargando el estado."}</div>`; }
+  catch (e) { $("#home-content").innerHTML = `<div class="vk-empty">${e.detail || "Error cargando el estado."}</div>`; }
 }
 async function loadHorizon() {
   if (horizonLoaded) return;
   $("#horizon-content").innerHTML = SKELETON.rows;
   try { renderHorizon(await api("/api/horizon?days=7")); horizonLoaded = true; }
-  catch (e) { $("#horizon-content").innerHTML = `<div class="loading">${e.detail || "Error."}</div>`; }
+  catch (e) { $("#horizon-content").innerHTML = `<div class="vk-empty">${e.detail || "Error."}</div>`; }
 }
 async function syncThenLoad() {
   loadHome();                       // pinta ya con lo que haya en BD (no bloquea)

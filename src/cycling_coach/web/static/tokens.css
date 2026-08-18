@@ -1,0 +1,163 @@
+/* Vikon v2 — tokens. Instrumento colorido: paneles rectos, chips píldora,
+   tintes por dato, acento y zonas saturadas. Claro y oscuro con el mismo
+   contrato de nombres: cambia el valor, nunca el nombre.
+   Modo: sigue al sistema; se puede forzar con <html data-theme="light|dark">. */
+
+@import url("/static/fonts.css");
+
+:root {
+  /* --- Tipografía --- */
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-body: 'Inter', system-ui, sans-serif;
+
+  --text-9: 9px;      /* clave de retícula, eje de gráfica */
+  --text-10: 10px;    /* clave mono en mayúsculas */
+  --text-11: 11px;
+  --text-12: 12px;
+  --text-13: 13px;    /* fila de panel */
+  --text-14: 14px;    /* cuerpo */
+  --text-16: 16px;    /* título de panel */
+  --text-21: 21px;    /* dato de retícula */
+  --text-27: 27px;    /* título de sesión */
+  --text-34: 34px;    /* dato de tile */
+  --text-44: 44px;    /* dato hero */
+
+  --leading-tight: 1.05;
+  --leading-body: 1.5;
+  --leading-prose: 1.6;
+  --tracking-key: 1.6px;   /* claves mono en mayúsculas */
+  --tracking-mark: 3px;    /* VIKON */
+  --tracking-display: -.6px;
+
+  /* --- Geometría: paneles rectos, chips píldora --- */
+  --r-panel: 6px;
+  --r-tile: 10px;
+  --r-input: 8px;
+  --r-chip: 999px;
+  --hairline: 1px;
+  --rail: 3px;             /* marca de zona a la izquierda de un bloque */
+
+  --space-2: 2px; --space-4: 4px; --space-6: 6px; --space-8: 8px;
+  --space-10: 10px; --space-12: 12px; --space-14: 14px; --space-16: 16px;
+  --space-18: 18px; --space-22: 22px; --space-28: 28px;
+
+  --app-width: 460px;
+  --nav-height: 56px;
+  --touch-min: 44px;
+
+  /* --- Movimiento --- */
+  --dur-fast: .14s; --dur-base: .2s; --dur-enter: .28s; --dur-gauge: .5s;
+  --ease-standard: cubic-bezier(.2,.7,.3,1);
+  --ease-gauge: cubic-bezier(.2,.8,.2,1);
+  --stagger: .03s;
+
+  /* --- Zonas de potencia: el único color que jamás cambia de significado --- */
+  --zone-1: #78879E;   /* recuperación */
+  --zone-2: #2F5BFF;   /* resistencia */
+  --zone-3: #12B9E8;   /* tempo */
+  --zone-4: #E89100;   /* umbral */
+  --zone-5: #FF6B4A;   /* VO2máx */
+  --zone-6: #E8354F;   /* neuromuscular */
+}
+
+/* ---------------- Modo claro (base) ---------------- */
+:root {
+  --bg: #F1F4F9;
+  --surface: #FFFFFF;
+  --surface-2: #E8EDF5;
+  --surface-ink: #0E1320;      /* panel de ancla oscuro en modo claro */
+  --line: #D7DEEA;
+  --line-soft: #E7ECF4;
+  --ink: #0E1320;
+  --ink-2: #3A4256;
+  --dim: #616B80;
+  --on-accent: #FFFFFF;
+  --on-ink: #EAF0F8;
+
+  --accent: #2F5BFF;
+  --accent-2: #12B9E8;
+  --accent-soft: #E3E9FF;
+
+  --ok: #0F9E74;
+  --warn: #C57A00;
+  --bad: #DE3A50;
+  --adjust: #E2542F;
+
+  /* Tintes por dato: fondo + tinta, siempre en pareja */
+  --tint-form: #FEE4E9;      --on-tint-form: #99203A;
+  --tint-fitness: #E3E9FF;   --on-tint-fitness: #23349E;
+  --tint-cri: #D9F5EB;       --on-tint-cri: #0A6B50;
+  --tint-engine: #EDE6FF;    --on-tint-engine: #4A20A0;
+  --tint-load: #FCEFD5;      --on-tint-load: #8A5300;
+  --tint-neutral: var(--surface-2); --on-tint-neutral: var(--ink-2);
+
+  --grid-line: rgba(14,19,32,.07);
+  --grid-strong: rgba(14,19,32,.22);
+  --shadow: none;            /* v2 no usa sombra: separa con línea y tinte */
+  --focus: 0 0 0 2px var(--accent-soft), 0 0 0 4px var(--accent);
+}
+
+/* ---------------- Modo oscuro ---------------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #080B11;
+    --surface: #11161E;
+    --surface-2: #1A2230;
+    --surface-ink: #1A2230;
+    --line: #212B3B;
+    --line-soft: #19212E;
+    --ink: #EAF0F8;
+    --ink-2: #C2CCDC;
+    --dim: #7C8899;
+    --on-accent: #05101F;
+    --on-ink: #EAF0F8;
+
+    --accent: #33E1FF;
+    --accent-2: #5B8CFF;
+    --accent-soft: rgba(51,225,255,.14);
+
+    --ok: #3FE0A8;
+    --warn: #FFB347;
+    --bad: #FF6B7F;
+    --adjust: #FF8A5C;
+
+    --tint-form: rgba(255,107,127,.14);   --on-tint-form: #FF9BAA;
+    --tint-fitness: rgba(91,140,255,.16); --on-tint-fitness: #9DB7FF;
+    --tint-cri: rgba(63,224,168,.14);     --on-tint-cri: #7CE8C4;
+    --tint-engine: rgba(167,120,255,.16); --on-tint-engine: #C4A6FF;
+    --tint-load: rgba(255,179,71,.14);    --on-tint-load: #FFCB84;
+    --tint-neutral: var(--surface-2);     --on-tint-neutral: var(--ink-2);
+
+    --zone-1: #8C99AD;
+    --zone-2: #5B8CFF;
+    --zone-3: #33E1FF;
+    --zone-4: #FFB347;
+    --zone-5: #FF8A5C;
+    --zone-6: #FF6B7F;
+
+    --grid-line: rgba(255,255,255,.05);
+    --grid-strong: rgba(255,255,255,.22);
+  }
+}
+
+/* Forzado explícito para fichas y capturas */
+:root[data-theme="dark"] {
+  --bg: #080B11; --surface: #11161E; --surface-2: #1A2230; --surface-ink: #1A2230;
+  --line: #212B3B; --line-soft: #19212E; --ink: #EAF0F8; --ink-2: #C2CCDC; --dim: #7C8899;
+  --on-accent: #05101F; --on-ink: #EAF0F8;
+  --accent: #33E1FF; --accent-2: #5B8CFF; --accent-soft: rgba(51,225,255,.14);
+  --ok: #3FE0A8; --warn: #FFB347; --bad: #FF6B7F; --adjust: #FF8A5C;
+  --tint-form: rgba(255,107,127,.14); --on-tint-form: #FF9BAA;
+  --tint-fitness: rgba(91,140,255,.16); --on-tint-fitness: #9DB7FF;
+  --tint-cri: rgba(63,224,168,.14); --on-tint-cri: #7CE8C4;
+  --tint-engine: rgba(167,120,255,.16); --on-tint-engine: #C4A6FF;
+  --tint-load: rgba(255,179,71,.14); --on-tint-load: #FFCB84;
+  --zone-1: #8C99AD; --zone-2: #5B8CFF; --zone-3: #33E1FF;
+  --zone-4: #FFB347; --zone-5: #FF8A5C; --zone-6: #FF6B7F;
+  --grid-line: rgba(255,255,255,.05); --grid-strong: rgba(255,255,255,.22);
+}
+
+@keyframes vk2-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes vk2-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

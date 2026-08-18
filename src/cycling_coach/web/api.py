@@ -248,6 +248,11 @@ def _plan_json(p: PlannedSession | None) -> dict[str, Any] | None:
         "targets": p.targets,
         "rationale": p.rationale,
         "aspired": p.aspired.value if p.aspired else None,
+        # Coste de la sesión: la portada los muestra junto a la duración, y son
+        # los mismos números con los que el planificador eligió esta dosis.
+        "tss": round(estimate_session_tss(p.template)),
+        "intensity": round(session_intensity(p.template), 2),
+        "description": p.template.description,
     }
 
 
